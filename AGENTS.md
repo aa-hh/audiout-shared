@@ -56,6 +56,11 @@ share had to become a repository of its own.
   than `CompanionProto.version` is refused; an older peer is fine to talk to.
   This runs twice: on the Bonjour TXT `proto` key before a socket opens, and
   again on `hello`/`welcome`'s `protoVersion` once connected.
+- **Icons ride OUTSIDE `Snapshot` on purpose.** `AppIconPayload` /
+  `CompanionAppIcons` are their own request/response pair, bounded by a page
+  size and a request cap, precisely so that the server's identical-snapshot
+  suppression is never defeated by icon churn. Fold an icon into `Snapshot` and
+  every late-resolving icon re-sends the entire app state.
 
 ### ProbeKit
 
