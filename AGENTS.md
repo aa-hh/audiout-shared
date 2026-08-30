@@ -3,7 +3,7 @@
 ## Purpose
 
 Everything the Audiout Mac app and the Audiout iPhone companion both need, and
-nothing else. Two products in one package:
+nothing else. Three products in one package:
 
 - **`AudioutProtocol`** — the wire protocol the Mac's `CompanionServer` and the
   phone speak: Bonjour constants (`CompanionProto`), the JSON envelope
@@ -14,6 +14,9 @@ nothing else. Two products in one package:
   target lane play at one scheduled moment; one microphone hears both, so
   capture latency and the shared start cancel in the arrival DIFFERENCE. This
   package synthesises the sweeps and recovers that difference.
+- **`AudioutField`** — the brand's emitter-field constants (emitter positions,
+  motion, and each scene's colour ramp), as data only. See its own section
+  below.
 
 **This repository exists because SwiftPM cannot depend on a package inside a
 subdirectory of another repo.** A git dependency's manifest has to sit at that
@@ -99,6 +102,27 @@ share had to become a repository of its own.
   invented.
 - **Pure DSP, and it stays that way.** No `AVFoundation`, no networking, no app
   types. Anything touching a microphone or a socket belongs in the app.
+
+### AudioutField
+
+- **This is data, with no drawing code in it.** `Sources/AudioutField/field.json`
+  holds the emitter-field numbers — positions, orbit, speed, density, and each
+  scene's colour ramp. There are four implementations of the field that read
+  it, one per surface, because each draws in its own technology: the Audiouter
+  Website's `src/scripts/fields/emitters.js` (WebGL), its
+  `tools/og-card/emitter.js` (SVG, for the static share card), and the Mac
+  app's `EmitterFieldView.swift` (Metal, currently on the Mac repo's branch
+  `claude/license-key-splash-screen-5d5929`). A port reads these numbers; it
+  never retypes them — that hand-copy into the Metal shader with nothing to
+  catch drift is the exact problem this target exists to remove.
+- **npm can read it too.** The root `package.json` exists only so an Astro (or
+  any Node) consumer can `npm i github:aa-hh/audiout-shared#<ref>` and import
+  `Sources/AudioutField/field.json` directly — no build step, no other files
+  published. Swift consumers keep using SwiftPM as normal; this is a second
+  door onto the same file, not a second copy of it.
+- **npm pins by git ref for now.** Until this lands on `main` there's no tag
+  to point at; an npm consumer names the branch (or a commit) and moves to a
+  version tag once it ships, same as the Swift pin.
 
 ## Tests
 

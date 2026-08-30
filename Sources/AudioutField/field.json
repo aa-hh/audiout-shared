@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "defaults": {
+    "emitters": [[-0.6, 0.24], [0.86, -0.04], [0.08, 0.52]],
+    "orbit": 0.1,
+    "squash": 1.12,
+    "speedBase": 1.11,
+    "speedStep": 0.2,
+    "densBase": 17.0,
+    "densStep": 3.0,
+    "sharp": 4.0,
+    "fade": 1.5,
+    "wobble": 0,
+    "wobbleRate": 0.5,
+    "breatheFloor": 0.4,
+    "breatheDepth": 0.6,
+    "breatheRate": 0.1,
+    "breatheStep": 0.028,
+    "sequence": false,
+    "cycle": 7.0,
+    "duty": 1.0,
+    "rise": 0.22,
+    "tail": 0.22,
+    "reach": 1.4,
+    "front": 0.18,
+    "emerge": 0,
+    "emergeFront": 0.12,
+    "gain": 0.65,
+    "paperLift": 1.94
+  },
+  "ramps": {
+    "Movie night": { "lo": [0.039, 0.431, 0.247], "mid": [0.169, 1.0, 0.561], "peak": [0.859, 1.0, 0.933] },
+    "Chill out":   { "lo": [0.243, 0.184, 0.086], "mid": [0.91, 0.722, 0.294], "peak": [1.0, 0.851, 0.478] },
+    "Dinner party":{ "lo": [0.458, 0.172, 0.408], "mid": [1.0, 0.566, 0.913], "peak": [1.0, 0.798, 0.951] }
+  }
+}
