@@ -1,0 +1,8 @@
+{
+  "name": "audiout-shared",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Shared Audiout constants. The Swift products are consumed via SwiftPM; npm consumers want Sources/AudioutField/field.json only.",
+  "files": ["Sources/AudioutField/field.json"],
+  "license": "MIT"
+}
