@@ -26,6 +26,19 @@ share had to become a repository of its own.
 - **Every change here lands in two apps.** Nothing in this package has a single
   consumer, so there is no such thing as a local fix. Before changing a type,
   ask what the other end does with it.
+- **A consumer's pin makes this package read-only from inside that repo —
+  which is exactly why hand-copying a type in is the path of least
+  resistance, and exactly what happened to `SyncProbeCorrelator` before it
+  had a name to fix it by.** Both Mac and iPhone repos now run a pre-commit
+  guard that blocks that copy; this is the path that's supposed to win
+  instead. For a new wire field, a protocol case, or a ProbeKit tweak:
+  1. Edit it here, not in a consumer repo.
+  2. `swift test` (see Tests below).
+  3. Tag and push: `git tag X.Y.Z && git push origin main --tags`. Whether
+     that also bumps `CompanionProto.version` is the AudioutProtocol rule
+     above — additive cases don't, semantic changes do.
+  4. Bump the pin in **both** consumers in the same session — a protocol
+     change ships to both apps together or not at all.
 - **MIT, and every source file says so.** That is load-bearing in both
   directions: the Mac app is GPL (it links the vendored OwnTone-derived sender
   in `AirPlayEngine`), and the phone app ships closed-source. A GPL header here
