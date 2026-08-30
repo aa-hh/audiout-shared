@@ -224,10 +224,15 @@ public struct SyncProbeCorrelator {
     public func arrival(of probe: [Float], in recording: [Float],
                  ambientNoise: [Float]? = nil) -> Arrival? {
         guard probe.count > 1, recording.count >= probe.count else { return nil }
-        let corr = Self.correlate(recording: recording, probe: probe,
-                                  ambientNoise: ambientNoise)
         let searchCount = recording.count - probe.count + 1
         guard searchCount > 0 else { return nil }
+        // A refused correlation is a refused arrival. `corr` is otherwise the
+        // FFT length, always ≥ `searchCount`; the count check states that
+        // rather than trusting it, since every index below rides on it.
+        guard let corr = Self.correlate(recording: recording, probe: probe,
+                                        ambientNoise: ambientNoise),
+              corr.count >= searchCount
+        else { return nil }
 
         var peakIndex = 0
         var peakValue = -Float.infinity
@@ -285,14 +290,26 @@ public struct SyncProbeCorrelator {
     /// Linear cross-correlation of `recording` against `probe` via FFT:
     /// `corr[lag] = Σ recording[lag+i] · probe[i]`, optionally divided per
     /// frequency bin by the ambient noise power spectrum.
+    ///
+    /// `nil` when vDSP declines to build a transform of the required length —
+    /// the only way this function fails. It is `nil` rather than `[]` on
+    /// purpose: an empty array flows straight into the caller's search loop
+    /// and is indexed, which is an out-of-range CRASH where this package's
+    /// whole contract is to refuse instead. An Optional makes the compiler
+    /// force that decision at every call site, so the guarantee cannot be
+    /// deleted later by someone tidying a guard away.
+    ///
+    /// The failure is unreachable on macOS and reachable on a phone: a 15 s
+    /// tape at 48 kHz asks for n = 2^20, each call transiently holds ~46 MB,
+    /// and under iOS memory pressure the allocation can be declined.
     static func correlate(recording: [Float], probe: [Float],
-                          ambientNoise: [Float]?) -> [Float] {
+                          ambientNoise: [Float]?) -> [Float]? {
         let n = fftLength(for: recording.count + probe.count)
         guard let forward = vDSP.DFT(count: n, direction: .forward,
                                      transformType: .complexComplex, ofType: Float.self),
               let inverse = vDSP.DFT(count: n, direction: .inverse,
                                      transformType: .complexComplex, ofType: Float.self)
-        else { return [] }
+        else { return nil }
 
         let zeros = [Float](repeating: 0, count: n)
         let recPadded = recording + [Float](repeating: 0, count: n - recording.count)
