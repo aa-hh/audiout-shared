@@ -27,7 +27,12 @@ public enum CompanionMessage: Equatable, Sendable {
     case command(requestID: String, command: CompanionCommand)
 
     // server -> client
-    case welcome(serverName: String, protoVersion: Int, snapshot: Snapshot)
+    /// `companionToken` is the licence server's signed token for this Mac's
+    /// key (Ed25519 over a JSON payload; the phone verifies it offline), or
+    /// `nil` when the Mac has none — an unlicensed or never-checked-in Mac,
+    /// or an older Mac whose `welcome` predates the field. It is absent from
+    /// the wire when `nil`, so an older phone never sees the key at all.
+    case welcome(serverName: String, protoVersion: Int, snapshot: Snapshot, companionToken: String?)
     /// The hello was valid but this phone isn't approved yet: the Mac is
     /// showing its user an allow/deny prompt, and holds the connection open
     /// (generously — minutes, not the handshake deadline) until they answer.
@@ -112,7 +117,7 @@ extension CompanionEnvelope: Codable {
     private enum PayloadKeys: String, CodingKey {
         case clientID, clientName, protoVersion
         case requestID, command
-        case serverName, snapshot
+        case serverName, snapshot, companionToken
         case applied, refusalReason, autoSwappedCurrentDevice
         case reason
         case page, pageCount, icons
@@ -152,7 +157,8 @@ extension CompanionEnvelope: Codable {
             message = .welcome(
                 serverName: try payload.decode(String.self, forKey: .serverName),
                 protoVersion: try payload.decode(Int.self, forKey: .protoVersion),
-                snapshot: try payload.decode(Snapshot.self, forKey: .snapshot)
+                snapshot: try payload.decode(Snapshot.self, forKey: .snapshot),
+                companionToken: try payload.decodeIfPresent(String.self, forKey: .companionToken)
             )
         case .awaitingApproval:
             message = .awaitingApproval
@@ -195,12 +201,13 @@ extension CompanionEnvelope: Codable {
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(requestID, forKey: .requestID)
             try payload.encode(command, forKey: .command)
-        case .welcome(let serverName, let protoVersion, let snapshot):
+        case .welcome(let serverName, let protoVersion, let snapshot, let companionToken):
             try c.encode(TypeName.welcome.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(serverName, forKey: .serverName)
             try payload.encode(protoVersion, forKey: .protoVersion)
             try payload.encode(snapshot, forKey: .snapshot)
+            try payload.encodeIfPresent(companionToken, forKey: .companionToken)
         case .awaitingApproval:
             try c.encode(TypeName.awaitingApproval.rawValue, forKey: .type)
             // Empty payload object — every type carries one (decode reads the

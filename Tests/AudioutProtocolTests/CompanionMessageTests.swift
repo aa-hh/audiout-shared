@@ -115,8 +115,21 @@ import Testing
     }
 
     @Test func welcomeRoundTrips() throws {
-        let message = CompanionMessage.welcome(serverName: "Alec's Mac", protoVersion: 1, snapshot: Self.fullSnapshot())
+        let message = CompanionMessage.welcome(serverName: "Alec's Mac", protoVersion: 1, snapshot: Self.fullSnapshot(), companionToken: nil)
         #expect(try roundTrip(message) == message)
+    }
+
+    @Test func welcomeRoundTripsWithACompanionToken() throws {
+        let message = CompanionMessage.welcome(serverName: "Alec's Mac", protoVersion: 1, snapshot: Self.fullSnapshot(), companionToken: "eyJ2IjoxfQ.c2ln")
+        #expect(try roundTrip(message) == message)
+    }
+
+    /// An unlicensed Mac must not leak the key onto the wire at all —
+    /// `null` would still be a key an older phone's decoder has to tolerate.
+    @Test func welcomeOmitsTheCompanionTokenKeyWhenNil() throws {
+        let envelope = CompanionEnvelope(message: .welcome(serverName: "Mac", protoVersion: 1, snapshot: Self.fullSnapshot(), companionToken: nil))
+        let json = try #require(String(data: envelope.encoded(), encoding: .utf8))
+        #expect(!json.contains("companionToken"))
     }
 
     @Test func stateRoundTrips() throws {
@@ -321,9 +334,9 @@ import Testing
     /// Client-side direction: the phone receives `welcome` and checks the
     /// Mac's `protoVersion`.
     @Test func clientRefusesAWelcomeAdvertisingANewerProtoVersion() throws {
-        let envelope = CompanionEnvelope(message: .welcome(serverName: "Mac", protoVersion: CompanionProto.version + 1, snapshot: Self.fullSnapshot()))
+        let envelope = CompanionEnvelope(message: .welcome(serverName: "Mac", protoVersion: CompanionProto.version + 1, snapshot: Self.fullSnapshot(), companionToken: nil))
         let decoded = try CompanionEnvelope.decode(envelope.encoded())
-        guard case .welcome(_, let protoVersion, _) = decoded.message else {
+        guard case .welcome(_, let protoVersion, _, _) = decoded.message else {
             Issue.record("expected .welcome")
             return
         }
@@ -386,12 +399,13 @@ import Testing
         }}}
         """
         let envelope = try CompanionEnvelope.decode(Data(json.utf8))
-        guard case .welcome(let serverName, let protoVersion, let snapshot) = envelope.message else {
+        guard case .welcome(let serverName, let protoVersion, let snapshot, let companionToken) = envelope.message else {
             Issue.record("expected .welcome")
             return
         }
         #expect(serverName == "Alec's Mac")
         #expect(protoVersion == 1)
+        #expect(companionToken == nil, "a welcome from a Mac that predates the field decodes as no token")
         #expect(snapshot.mainOut == MainOutState(kind: "selected"))
         #expect(snapshot.devices.isEmpty)
         #expect(snapshot.activeGroupID == nil)
