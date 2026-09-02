@@ -4,7 +4,8 @@ import Foundation
 
 /// One message on the WebSocket connection between the Mac (`CompanionServer`)
 /// and the phone. Client→server: `hello`, `command`. Server→client: `welcome`,
-/// `awaitingApproval`, `state`, `commandResult`, `goodbye`, `appIcons`. `.unknown` is a
+/// `awaitingApproval`, `state`, `commandResult`, `goodbye`, `appIcons`,
+/// `alignmentProbeStarted`, `alignmentProbeFinished`. `.unknown` is a
 /// decode-only case: a message type neither side recognizes yet (e.g. a newer
 /// peer's message type) decodes into it rather than throwing, so a version
 /// skew never crashes the connection — the client ignores it, the server
@@ -41,6 +42,13 @@ public enum CompanionMessage: Equatable, Sendable {
     /// `CompanionCommand.requestAppIcons`, at most
     /// `CompanionAppIcons.pageSize` icons per page.
     case appIcons(page: Int, pageCount: Int, icons: [AppIconPayload])
+    /// The two moments `ProbeSession` is built to be told about: sweeps
+    /// entered the feed, and the last sweep frame entered it. Sent only to
+    /// the client that staged the probe (`CompanionCommand.startAlignmentProbe`).
+    case alignmentProbeStarted(deviceID: String)
+    /// See `alignmentProbeStarted` — the matching "last sweep frame entered
+    /// the feed" moment.
+    case alignmentProbeFinished(deviceID: String)
 
     case unknown(type: String)
 }
@@ -108,10 +116,12 @@ extension CompanionEnvelope: Codable {
         case applied, refusalReason, autoSwappedCurrentDevice
         case reason
         case page, pageCount, icons
+        case deviceID
     }
 
     private enum TypeName: String {
         case hello, command, welcome, awaitingApproval, state, commandResult, goodbye, appIcons
+        case alignmentProbeStarted, alignmentProbeFinished
     }
 
     public init(from decoder: Decoder) throws {
@@ -163,6 +173,10 @@ extension CompanionEnvelope: Codable {
                 pageCount: try payload.decode(Int.self, forKey: .pageCount),
                 icons: try payload.decode([AppIconPayload].self, forKey: .icons)
             )
+        case .alignmentProbeStarted:
+            message = .alignmentProbeStarted(deviceID: try payload.decode(String.self, forKey: .deviceID))
+        case .alignmentProbeFinished:
+            message = .alignmentProbeFinished(deviceID: try payload.decode(String.self, forKey: .deviceID))
         }
     }
 
@@ -213,6 +227,14 @@ extension CompanionEnvelope: Codable {
             try payload.encode(page, forKey: .page)
             try payload.encode(pageCount, forKey: .pageCount)
             try payload.encode(icons, forKey: .icons)
+        case .alignmentProbeStarted(let deviceID):
+            try c.encode(TypeName.alignmentProbeStarted.rawValue, forKey: .type)
+            var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
+            try payload.encode(deviceID, forKey: .deviceID)
+        case .alignmentProbeFinished(let deviceID):
+            try c.encode(TypeName.alignmentProbeFinished.rawValue, forKey: .type)
+            var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
+            try payload.encode(deviceID, forKey: .deviceID)
         case .unknown(let type):
             // Round-trips as whatever it decoded from; there is no payload
             // to re-emit since we never understood its shape.

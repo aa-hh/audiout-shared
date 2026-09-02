@@ -139,6 +139,16 @@ import Testing
         #expect(try roundTrip(message) == message)
     }
 
+    @Test func alignmentProbeStartedRoundTrips() throws {
+        let message = CompanionMessage.alignmentProbeStarted(deviceID: "device-2")
+        #expect(try roundTrip(message) == message)
+    }
+
+    @Test func alignmentProbeFinishedRoundTrips() throws {
+        let message = CompanionMessage.alignmentProbeFinished(deviceID: "device-2")
+        #expect(try roundTrip(message) == message)
+    }
+
     @Test func appIconsRoundTrips() throws {
         let message = CompanionMessage.appIcons(
             page: 1,
@@ -162,6 +172,64 @@ import Testing
         let data = try JSONEncoder().encode(snapshot)
         let reloaded = try JSONDecoder().decode(Snapshot.self, from: data)
         #expect(reloaded == snapshot)
+    }
+
+    @Test func deviceStateWithFullAlignmentStateRoundTrips() throws {
+        let device = DeviceState(
+            id: "device-3",
+            name: "Kitchen JBL",
+            kind: "bluetooth",
+            iconSymbolName: "hifispeaker.fill",
+            isAvailable: true,
+            supportsAirPlay2: false,
+            isLocalDevice: false,
+            volume: 60,
+            isMuted: false,
+            isSelected: true,
+            isMainOutMember: false,
+            connection: DeviceState.ConnectionInfo(state: "connected"),
+            alignment: DeviceState.AlignmentState(
+                status: "stale",
+                staleReason: "reconnected",
+                referenceID: "device-1",
+                settleRemainingSeconds: 42
+            )
+        )
+        let data = try JSONEncoder().encode(device)
+        let reloaded = try JSONDecoder().decode(DeviceState.self, from: data)
+        #expect(reloaded == device)
+    }
+
+    @Test func deviceStateWithNilAlignmentRoundTrips() throws {
+        let device = DeviceState(
+            id: "device-1",
+            name: "Living Room",
+            kind: "airplay",
+            iconSymbolName: "hifispeaker.fill",
+            isAvailable: true,
+            supportsAirPlay2: true,
+            isLocalDevice: false,
+            volume: 80,
+            isMuted: false,
+            isSelected: true,
+            isMainOutMember: true,
+            connection: DeviceState.ConnectionInfo(state: "connected")
+        )
+        let data = try JSONEncoder().encode(device)
+        let reloaded = try JSONDecoder().decode(DeviceState.self, from: data)
+        #expect(reloaded == device)
+        #expect(reloaded.alignment == nil)
+    }
+
+    /// Old-peer compatibility: a `DeviceState` JSON object with no
+    /// `alignment` key at all (a pre-alignment Mac) must still decode.
+    @Test func deviceStateWithoutAlignmentKeyDecodes() throws {
+        let json = """
+        {"id": "device-1", "name": "Living Room", "kind": "airplay", "iconSymbolName": "hifispeaker.fill", "isAvailable": true, "supportsAirPlay2": true, "isLocalDevice": false, "volume": 80, "isMuted": false, "isSelected": true, "isMainOutMember": true, "connection": {"state": "connected"}}
+        """
+        let device = try JSONDecoder().decode(DeviceState.self, from: Data(json.utf8))
+        #expect(device.alignment == nil)
+        #expect(device.id == "device-1")
     }
 
     // MARK: - Every command case round-trips
@@ -188,6 +256,14 @@ import Testing
         .setConnectVolume(volume: 60),
         .setStartBufferMs(ms: 300),
         .requestAppIcons(bundleIDs: ["com.spotify.client", "com.apple.Music"]),
+        .startAlignmentProbe(targetID: "device-2"),
+        .cancelAlignmentProbe(targetID: "device-2"),
+        .reportAlignmentMeasurement(targetID: "device-2", offsetMs: 96.5, confidence: 30.0),
+        .setAlignmentTick(targetID: "device-2", active: true),
+        .nudgeAlignmentTrim(targetID: "device-2", deltaMs: -5.0),
+        .revertAlignmentNudge(targetID: "device-2"),
+        .clearAlignmentTuning(targetID: "device-2"),
+        .playAlignmentDemo(targetID: "device-2"),
     ])
     func everyCommandCaseRoundTrips(_ command: CompanionCommand) throws {
         let data = try JSONEncoder().encode(command)

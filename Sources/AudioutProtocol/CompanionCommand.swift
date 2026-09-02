@@ -53,6 +53,32 @@ public enum CompanionCommand: Equatable, Sendable {
     case setStartBufferMs(ms: Int)
     case requestAppIcons(bundleIDs: [String])
 
+    /// Starts a sync-calibration run for `targetID`: the Mac stages and
+    /// plays the chirp measurement. Refused (as a failed `commandResult`)
+    /// when the target isn't currently audible or no audible reference
+    /// exists.
+    case startAlignmentProbe(targetID: String)
+    /// Cancels an in-flight sync-calibration run for `targetID`.
+    case cancelAlignmentProbe(targetID: String)
+    /// Reports the phone's raw sweep-arrival measurement for `targetID`.
+    /// Raw only: no sign convention or trim arithmetic belongs on the wire —
+    /// the Mac owns trim semantics and subtracts any staging stagger before
+    /// applying it.
+    case reportAlignmentMeasurement(targetID: String, offsetMs: Double, confidence: Double)
+    /// Turns the by-ear fine-tune metronome tick on/off for `targetID`.
+    case setAlignmentTick(targetID: String, active: Bool)
+    /// Nudges `targetID`'s alignment trim by `deltaMs` (one haptic detent's
+    /// worth). Applied immediately, never coalesced.
+    case nudgeAlignmentTrim(targetID: String, deltaMs: Double)
+    /// Reverts `targetID`'s trim to the value recorded at tick-session start.
+    case revertAlignmentNudge(targetID: String)
+    /// Clears `targetID`'s alignment tuning entirely; the row returns to
+    /// "Timing not set".
+    case clearAlignmentTuning(targetID: String)
+    /// Plays the A/B "hear it" demo for `targetID`: pre-measurement value,
+    /// then current value, on target + reference.
+    case playAlignmentDemo(targetID: String)
+
     /// An unrecognized `"command"` string — e.g. a newer phone talking to an
     /// older Mac. Decodes without throwing so the server can answer with a
     /// failed `commandResult` instead of dropping the connection.
@@ -69,6 +95,9 @@ extension CompanionCommand: Codable {
         case bundleID, displayName, kind, deviceID
         case ms
         case bundleIDs
+        case offsetMs, confidence
+        case active
+        case deltaMs
     }
 
     private enum Name: String {
@@ -77,6 +106,9 @@ extension CompanionCommand: Codable {
         case createGroup, updateGroup, deleteGroup, setGroupMuted
         case addAppRoute, removeAppRoute, setAppDestination, setAppVolume
         case setConnectVolume, setStartBufferMs, requestAppIcons
+        case startAlignmentProbe, cancelAlignmentProbe, reportAlignmentMeasurement
+        case setAlignmentTick, nudgeAlignmentTrim, revertAlignmentNudge
+        case clearAlignmentTuning, playAlignmentDemo
     }
 
     public init(from decoder: Decoder) throws {
@@ -131,6 +163,26 @@ extension CompanionCommand: Codable {
             self = .setStartBufferMs(ms: try c.decode(Int.self, forKey: .ms))
         case .requestAppIcons:
             self = .requestAppIcons(bundleIDs: try c.decode([String].self, forKey: .bundleIDs))
+        case .startAlignmentProbe:
+            self = .startAlignmentProbe(targetID: try c.decode(String.self, forKey: .id))
+        case .cancelAlignmentProbe:
+            self = .cancelAlignmentProbe(targetID: try c.decode(String.self, forKey: .id))
+        case .reportAlignmentMeasurement:
+            self = .reportAlignmentMeasurement(
+                targetID: try c.decode(String.self, forKey: .id),
+                offsetMs: try c.decode(Double.self, forKey: .offsetMs),
+                confidence: try c.decode(Double.self, forKey: .confidence)
+            )
+        case .setAlignmentTick:
+            self = .setAlignmentTick(targetID: try c.decode(String.self, forKey: .id), active: try c.decode(Bool.self, forKey: .active))
+        case .nudgeAlignmentTrim:
+            self = .nudgeAlignmentTrim(targetID: try c.decode(String.self, forKey: .id), deltaMs: try c.decode(Double.self, forKey: .deltaMs))
+        case .revertAlignmentNudge:
+            self = .revertAlignmentNudge(targetID: try c.decode(String.self, forKey: .id))
+        case .clearAlignmentTuning:
+            self = .clearAlignmentTuning(targetID: try c.decode(String.self, forKey: .id))
+        case .playAlignmentDemo:
+            self = .playAlignmentDemo(targetID: try c.decode(String.self, forKey: .id))
         }
     }
 
@@ -201,6 +253,34 @@ extension CompanionCommand: Codable {
         case .requestAppIcons(let bundleIDs):
             try c.encode(Name.requestAppIcons.rawValue, forKey: .command)
             try c.encode(bundleIDs, forKey: .bundleIDs)
+        case .startAlignmentProbe(let targetID):
+            try c.encode(Name.startAlignmentProbe.rawValue, forKey: .command)
+            try c.encode(targetID, forKey: .id)
+        case .cancelAlignmentProbe(let targetID):
+            try c.encode(Name.cancelAlignmentProbe.rawValue, forKey: .command)
+            try c.encode(targetID, forKey: .id)
+        case .reportAlignmentMeasurement(let targetID, let offsetMs, let confidence):
+            try c.encode(Name.reportAlignmentMeasurement.rawValue, forKey: .command)
+            try c.encode(targetID, forKey: .id)
+            try c.encode(offsetMs, forKey: .offsetMs)
+            try c.encode(confidence, forKey: .confidence)
+        case .setAlignmentTick(let targetID, let active):
+            try c.encode(Name.setAlignmentTick.rawValue, forKey: .command)
+            try c.encode(targetID, forKey: .id)
+            try c.encode(active, forKey: .active)
+        case .nudgeAlignmentTrim(let targetID, let deltaMs):
+            try c.encode(Name.nudgeAlignmentTrim.rawValue, forKey: .command)
+            try c.encode(targetID, forKey: .id)
+            try c.encode(deltaMs, forKey: .deltaMs)
+        case .revertAlignmentNudge(let targetID):
+            try c.encode(Name.revertAlignmentNudge.rawValue, forKey: .command)
+            try c.encode(targetID, forKey: .id)
+        case .clearAlignmentTuning(let targetID):
+            try c.encode(Name.clearAlignmentTuning.rawValue, forKey: .command)
+            try c.encode(targetID, forKey: .id)
+        case .playAlignmentDemo(let targetID):
+            try c.encode(Name.playAlignmentDemo.rawValue, forKey: .command)
+            try c.encode(targetID, forKey: .id)
         case .unknown(let name):
             // Round-trips as whatever it decoded from — re-encoding an
             // `.unknown` just forwards the original unrecognized name with

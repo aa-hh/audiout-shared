@@ -36,6 +36,35 @@ public struct DeviceState: Codable, Equatable, Sendable {
         }
     }
 
+    /// A Bluetooth device's sync-calibration state, as the phone needs to
+    /// render the row and gate the sync sheet's CTA. Only Bluetooth rows
+    /// ever carry this; `nil` on `DeviceState.alignment` means "not
+    /// reported" (an old Mac, or a non-Bluetooth device).
+    public struct AlignmentState: Codable, Equatable, Sendable {
+        /// `"notSet"` | `"tuned"` | `"stale"`.
+        public var status: String
+        /// v1: `"reconnected"`.
+        public var staleReason: String?
+        /// The audible reference the Mac would measure against; `nil` means
+        /// none usable, which gates the sync sheet's CTA off.
+        public var referenceID: String?
+        /// > 0 while inside the ~60 s post-connect clock-settling window;
+        /// the phone counts this down locally.
+        public var settleRemainingSeconds: Int?
+
+        public init(
+            status: String,
+            staleReason: String? = nil,
+            referenceID: String? = nil,
+            settleRemainingSeconds: Int? = nil
+        ) {
+            self.status = status
+            self.staleReason = staleReason
+            self.referenceID = referenceID
+            self.settleRemainingSeconds = settleRemainingSeconds
+        }
+    }
+
     public var id: String
     public var name: String
     /// `Device.Kind.rawValue`.
@@ -50,6 +79,10 @@ public struct DeviceState: Codable, Equatable, Sendable {
     public var isSelected: Bool
     public var isMainOutMember: Bool
     public var connection: ConnectionInfo
+    /// Sync-calibration state; only Bluetooth rows ever carry it. Optional
+    /// so a peer built before this field decodes cleanly (additive change,
+    /// no protocol break); `nil` means "not reported".
+    public var alignment: AlignmentState?
 
     public init(
         id: String,
@@ -63,7 +96,8 @@ public struct DeviceState: Codable, Equatable, Sendable {
         isMuted: Bool,
         isSelected: Bool,
         isMainOutMember: Bool,
-        connection: ConnectionInfo
+        connection: ConnectionInfo,
+        alignment: AlignmentState? = nil
     ) {
         self.id = id
         self.name = name
@@ -77,6 +111,7 @@ public struct DeviceState: Codable, Equatable, Sendable {
         self.isSelected = isSelected
         self.isMainOutMember = isMainOutMember
         self.connection = connection
+        self.alignment = alignment
     }
 }
 
