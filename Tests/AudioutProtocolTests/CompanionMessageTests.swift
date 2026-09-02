@@ -157,6 +157,11 @@ import Testing
         #expect(icons[1].png == nil)
     }
 
+    @Test func alignmentAppliedRoundTrips() throws {
+        let message = CompanionMessage.alignmentApplied(deviceID: "device-1", measuredMs: -12.5, correctedMs: 0)
+        #expect(try roundTrip(message) == message)
+    }
+
     @Test func fullyPopulatedSnapshotRoundTrips() throws {
         let snapshot = Self.fullSnapshot()
         let data = try JSONEncoder().encode(snapshot)

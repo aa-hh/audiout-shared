@@ -4,9 +4,10 @@ import Foundation
 
 /// One message on the WebSocket connection between the Mac (`CompanionServer`)
 /// and the phone. Client→server: `hello`, `command`. Server→client: `welcome`,
-/// `awaitingApproval`, `state`, `commandResult`, `goodbye`, `appIcons`. `.unknown` is a
-/// decode-only case: a message type neither side recognizes yet (e.g. a newer
-/// peer's message type) decodes into it rather than throwing, so a version
+/// `awaitingApproval`, `state`, `commandResult`, `goodbye`, `appIcons`,
+/// `alignmentApplied`. `.unknown` is a decode-only case: a message type
+/// neither side recognizes yet (e.g. a newer peer's message type) decodes
+/// into it rather than throwing, so a version
 /// skew never crashes the connection — the client ignores it, the server
 /// answers a `command`-shaped unknown with a failed `commandResult`.
 public enum CompanionMessage: Equatable, Sendable {
@@ -41,6 +42,16 @@ public enum CompanionMessage: Equatable, Sendable {
     /// `CompanionCommand.requestAppIcons`, at most
     /// `CompanionAppIcons.pageSize` icons per page.
     case appIcons(page: Int, pageCount: Int, icons: [AppIconPayload])
+    /// Sent by the Mac after it acts on a phone-driven sync measurement for a
+    /// Bluetooth speaker. `measuredMs` is the phone's raw measurement with
+    /// the Mac's internal playback stagger already subtracted (signed;
+    /// positive = the target speaker sounded LATE). `correctedMs` is the
+    /// change the Mac actually made to that speaker's stored latency; 0 when
+    /// clamping or flooring left the stored value where it was (e.g. the
+    /// target was ahead and the Mac cannot advance it). The phone drives its
+    /// verdict from these two numbers only, never from its own raw
+    /// measurement.
+    case alignmentApplied(deviceID: String, measuredMs: Double, correctedMs: Double)
 
     case unknown(type: String)
 }
@@ -108,10 +119,11 @@ extension CompanionEnvelope: Codable {
         case applied, refusalReason, autoSwappedCurrentDevice
         case reason
         case page, pageCount, icons
+        case deviceID, measuredMs, correctedMs
     }
 
     private enum TypeName: String {
-        case hello, command, welcome, awaitingApproval, state, commandResult, goodbye, appIcons
+        case hello, command, welcome, awaitingApproval, state, commandResult, goodbye, appIcons, alignmentApplied
     }
 
     public init(from decoder: Decoder) throws {
@@ -163,6 +175,12 @@ extension CompanionEnvelope: Codable {
                 pageCount: try payload.decode(Int.self, forKey: .pageCount),
                 icons: try payload.decode([AppIconPayload].self, forKey: .icons)
             )
+        case .alignmentApplied:
+            message = .alignmentApplied(
+                deviceID: try payload.decode(String.self, forKey: .deviceID),
+                measuredMs: try payload.decode(Double.self, forKey: .measuredMs),
+                correctedMs: try payload.decode(Double.self, forKey: .correctedMs)
+            )
         }
     }
 
@@ -213,6 +231,12 @@ extension CompanionEnvelope: Codable {
             try payload.encode(page, forKey: .page)
             try payload.encode(pageCount, forKey: .pageCount)
             try payload.encode(icons, forKey: .icons)
+        case .alignmentApplied(let deviceID, let measuredMs, let correctedMs):
+            try c.encode(TypeName.alignmentApplied.rawValue, forKey: .type)
+            var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
+            try payload.encode(deviceID, forKey: .deviceID)
+            try payload.encode(measuredMs, forKey: .measuredMs)
+            try payload.encode(correctedMs, forKey: .correctedMs)
         case .unknown(let type):
             // Round-trips as whatever it decoded from; there is no payload
             // to re-emit since we never understood its shape.
