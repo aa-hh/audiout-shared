@@ -215,7 +215,8 @@ import Testing
                 status: "stale",
                 staleReason: "reconnected",
                 referenceID: "device-1",
-                settleRemainingSeconds: 42
+                settleRemainingSeconds: 42,
+                clockState: "settling"
             )
         )
         let data = try JSONEncoder().encode(device)
