@@ -5,7 +5,8 @@ import Foundation
 /// One message on the WebSocket connection between the Mac (`CompanionServer`)
 /// and the phone. Client→server: `hello`, `command`. Server→client: `welcome`,
 /// `awaitingApproval`, `state`, `commandResult`, `goodbye`, `appIcons`,
-/// `alignmentProbeStarted`, `alignmentProbeFinished`. `.unknown` is a
+/// `alignmentProbeStarted`, `alignmentProbeFinished`, `alignmentApplied`.
+/// `.unknown` is a
 /// decode-only case: a message type neither side recognizes yet (e.g. a newer
 /// peer's message type) decodes into it rather than throwing, so a version
 /// skew never crashes the connection — the client ignores it, the server
@@ -54,6 +55,15 @@ public enum CompanionMessage: Equatable, Sendable {
     /// See `alignmentProbeStarted` — the matching "last sweep frame entered
     /// the feed" moment.
     case alignmentProbeFinished(deviceID: String)
+    /// The Mac's own verdict on an alignment report, sent after it applies
+    /// (or refuses) the measurement — only to the client that staged the run
+    /// for `deviceID`, the same one `alignmentProbeStarted` goes to.
+    /// `measuredMs` is the phone's raw report minus the run's own stagger
+    /// (signed; positive means the target sounded late).
+    /// `correctedMs` is the change the Mac made to the stored latency —
+    /// `max(0, value) − applied` (signed; `0` when clamping or flooring left
+    /// it where it was).
+    case alignmentApplied(deviceID: String, measuredMs: Double, correctedMs: Double)
     /// The Mac's licence came through while this phone was already
     /// connected: the same token `welcome` carries, sent to every welcomed
     /// client so a phone locked on a token-less welcome unlocks without
@@ -127,11 +137,12 @@ extension CompanionEnvelope: Codable {
         case reason
         case page, pageCount, icons
         case deviceID
+        case measuredMs, correctedMs
     }
 
     private enum TypeName: String {
         case hello, command, welcome, awaitingApproval, state, commandResult, goodbye, appIcons
-        case alignmentProbeStarted, alignmentProbeFinished, companionToken
+        case alignmentProbeStarted, alignmentProbeFinished, alignmentApplied, companionToken
     }
 
     public init(from decoder: Decoder) throws {
@@ -188,6 +199,12 @@ extension CompanionEnvelope: Codable {
             message = .alignmentProbeStarted(deviceID: try payload.decode(String.self, forKey: .deviceID))
         case .alignmentProbeFinished:
             message = .alignmentProbeFinished(deviceID: try payload.decode(String.self, forKey: .deviceID))
+        case .alignmentApplied:
+            message = .alignmentApplied(
+                deviceID: try payload.decode(String.self, forKey: .deviceID),
+                measuredMs: try payload.decode(Double.self, forKey: .measuredMs),
+                correctedMs: try payload.decode(Double.self, forKey: .correctedMs)
+            )
         case .companionToken:
             message = .companionToken(try payload.decode(String.self, forKey: .companionToken))
         }
@@ -249,6 +266,12 @@ extension CompanionEnvelope: Codable {
             try c.encode(TypeName.alignmentProbeFinished.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(deviceID, forKey: .deviceID)
+        case .alignmentApplied(let deviceID, let measuredMs, let correctedMs):
+            try c.encode(TypeName.alignmentApplied.rawValue, forKey: .type)
+            var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
+            try payload.encode(deviceID, forKey: .deviceID)
+            try payload.encode(measuredMs, forKey: .measuredMs)
+            try payload.encode(correctedMs, forKey: .correctedMs)
         case .companionToken(let token):
             try c.encode(TypeName.companionToken.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)

@@ -167,6 +167,11 @@ import Testing
         #expect(try roundTrip(message) == message)
     }
 
+    @Test func alignmentAppliedRoundTrips() throws {
+        let message = CompanionMessage.alignmentApplied(deviceID: "device-2", measuredMs: 40.5, correctedMs: 40)
+        #expect(try roundTrip(message) == message)
+    }
+
     @Test func appIconsRoundTrips() throws {
         let message = CompanionMessage.appIcons(
             page: 1,
