@@ -54,6 +54,11 @@ public enum CompanionMessage: Equatable, Sendable {
     /// See `alignmentProbeStarted` — the matching "last sweep frame entered
     /// the feed" moment.
     case alignmentProbeFinished(deviceID: String)
+    /// The Mac's licence came through while this phone was already
+    /// connected: the same token `welcome` carries, sent to every welcomed
+    /// client so a phone locked on a token-less welcome unlocks without
+    /// reconnecting.
+    case companionToken(String)
 
     case unknown(type: String)
 }
@@ -126,7 +131,7 @@ extension CompanionEnvelope: Codable {
 
     private enum TypeName: String {
         case hello, command, welcome, awaitingApproval, state, commandResult, goodbye, appIcons
-        case alignmentProbeStarted, alignmentProbeFinished
+        case alignmentProbeStarted, alignmentProbeFinished, companionToken
     }
 
     public init(from decoder: Decoder) throws {
@@ -183,6 +188,8 @@ extension CompanionEnvelope: Codable {
             message = .alignmentProbeStarted(deviceID: try payload.decode(String.self, forKey: .deviceID))
         case .alignmentProbeFinished:
             message = .alignmentProbeFinished(deviceID: try payload.decode(String.self, forKey: .deviceID))
+        case .companionToken:
+            message = .companionToken(try payload.decode(String.self, forKey: .companionToken))
         }
     }
 
@@ -242,6 +249,10 @@ extension CompanionEnvelope: Codable {
             try c.encode(TypeName.alignmentProbeFinished.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(deviceID, forKey: .deviceID)
+        case .companionToken(let token):
+            try c.encode(TypeName.companionToken.rawValue, forKey: .type)
+            var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
+            try payload.encode(token, forKey: .companionToken)
         case .unknown(let type):
             // Round-trips as whatever it decoded from; there is no payload
             // to re-emit since we never understood its shape.

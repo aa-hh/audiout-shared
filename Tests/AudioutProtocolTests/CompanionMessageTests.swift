@@ -132,6 +132,11 @@ import Testing
         #expect(!json.contains("companionToken"))
     }
 
+    @Test func companionTokenRoundTrips() throws {
+        let message = CompanionMessage.companionToken("eyJ2IjoxfQ.c2ln")
+        #expect(try roundTrip(message) == message)
+    }
+
     @Test func stateRoundTrips() throws {
         let message = CompanionMessage.state(snapshot: Self.fullSnapshot())
         #expect(try roundTrip(message) == message)
