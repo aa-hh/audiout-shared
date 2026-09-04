@@ -48,20 +48,35 @@ public struct DeviceState: Codable, Equatable, Sendable {
         /// The audible reference the Mac would measure against; `nil` means
         /// none usable, which gates the sync sheet's CTA off.
         public var referenceID: String?
-        /// > 0 while inside the ~60 s post-connect clock-settling window;
-        /// the phone counts this down locally.
+        /// Superseded by ``clockState`` (0.7.0): a Mac that publishes
+        /// `clockState` publishes `nil` here. Kept so an older snapshot still
+        /// decodes; a phone should gate on `clockState` when it is present.
         public var settleRemainingSeconds: Int?
+        /// The Mac's verdict on this speaker's Bluetooth clock since its link
+        /// came up, which is what decides whether a measurement now would
+        /// measure the speaker or the settling:
+        /// `"unknown"` — no verdict yet (fewer than ten jump-free seconds
+        /// observed and no jump seen, or the speaker is not playing);
+        /// `"settling"` — the Mac has seen the clock jump since link-up and
+        /// it has not yet held still for ten seconds;
+        /// `"steady"` — ten jump-free seconds observed, or a minute passed
+        /// with no evidence either way.
+        /// `nil` means the Mac does not report clock state (an older Mac);
+        /// treat as `"steady"`.
+        public var clockState: String?
 
         public init(
             status: String,
             staleReason: String? = nil,
             referenceID: String? = nil,
-            settleRemainingSeconds: Int? = nil
+            settleRemainingSeconds: Int? = nil,
+            clockState: String? = nil
         ) {
             self.status = status
             self.staleReason = staleReason
             self.referenceID = referenceID
             self.settleRemainingSeconds = settleRemainingSeconds
+            self.clockState = clockState
         }
     }
 
