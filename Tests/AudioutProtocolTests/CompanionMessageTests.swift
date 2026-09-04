@@ -63,6 +63,7 @@ import Testing
             appRoutes: [
                 AppRouteState(bundleID: "com.spotify.client", displayName: "Spotify", destinationKind: "device", deviceID: "device-1", volume: 90, isRunning: true),
                 AppRouteState(bundleID: "com.apple.Music", displayName: "Music", destinationKind: "noRedirect", volume: 100, isRunning: false),
+                AppRouteState(bundleID: "com.apple.Safari", displayName: "Safari", destinationKind: "group", groupID: "group-1", volume: 75, isRunning: true),
             ],
             liveRoutedAppNames: ["device-1": ["Spotify"]],
             addableApps: [Snapshot.AddableApp(bundleID: "com.apple.Podcasts", displayName: "Podcasts")],
@@ -421,5 +422,30 @@ import Testing
         #expect(snapshot.devices.isEmpty)
         #expect(snapshot.activeGroupID == nil)
         #expect(snapshot.takeoverStatus == nil)
+    }
+
+    /// A group route names WHICH group. The id rides its own field, so a
+    /// reader resolving `deviceID` against the device list never picks it up
+    /// by mistake — the whole reason the two are not one field.
+    @Test func aGroupRouteCarriesItsGroupIDSeparatelyFromDeviceID() throws {
+        let route = AppRouteState(bundleID: "com.apple.Safari", displayName: "Safari",
+                                  destinationKind: "group", groupID: "group-1",
+                                  volume: 75, isRunning: true)
+        let decoded = try JSONDecoder().decode(AppRouteState.self, from: JSONEncoder().encode(route))
+        #expect(decoded == route)
+        #expect(decoded.groupID == "group-1")
+        #expect(decoded.deviceID == nil, "a group id must never occupy the device slot")
+    }
+
+    /// A route from a Mac built before `groupID` existed decodes with the
+    /// field absent rather than throwing — the additive-field rule.
+    @Test func anAppRouteWithoutGroupIDDecodesAsNoGroup() throws {
+        let json = """
+        {"bundleID": "com.apple.Safari", "displayName": "Safari",
+         "destinationKind": "group", "volume": 75, "isRunning": true}
+        """
+        let decoded = try JSONDecoder().decode(AppRouteState.self, from: Data(json.utf8))
+        #expect(decoded.groupID == nil)
+        #expect(decoded.destinationKind == "group")
     }
 }

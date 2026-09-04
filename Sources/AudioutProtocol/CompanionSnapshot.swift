@@ -176,16 +176,27 @@ public struct GroupState: Codable, Equatable, Sendable {
 }
 
 /// One app's per-app routing redirect + volume, as the phone needs to render
-/// and edit it. `destinationKind`/`deviceID` mirror `AppRouteDestination`'s
-/// flattening in `AppRouteStore` on the Mac side (`.noRedirect` /
-/// `.currentDevice` / `.device(id:)`).
+/// and edit it. `destinationKind` plus ONE id field mirror
+/// `AppRouteDestination`'s flattening in `AppRouteStore` on the Mac side
+/// (`.noRedirect` / `.currentDevice` / `.device(id:)` / `.group(id:)`).
+///
+/// The two id spaces stay in separate fields rather than sharing one, exactly
+/// as `MainOutState` keeps `groupID` apart from its `kind`: a group id read as
+/// a device id resolves against the wrong list and renders as a missing
+/// device.
 public struct AppRouteState: Codable, Equatable, Sendable {
     public var bundleID: String
     public var displayName: String
-    /// `"noRedirect"` | `"currentDevice"` | `"device"`.
+    /// `"noRedirect"` | `"currentDevice"` | `"device"` | `"group"`.
     public var destinationKind: String
     /// Only non-nil when `destinationKind == "device"`.
     public var deviceID: String?
+    /// Only non-nil when `destinationKind == "group"`; resolve it against
+    /// `Snapshot.groups` for the name. Optional so a peer built before this
+    /// field decodes cleanly (additive change, no protocol break) — a `nil`
+    /// here on a `"group"` route means the Mac predates the field, so name
+    /// the destination generically rather than showing nothing.
+    public var groupID: String?
     public var volume: Int
     public var isRunning: Bool
 
@@ -194,6 +205,7 @@ public struct AppRouteState: Codable, Equatable, Sendable {
         displayName: String,
         destinationKind: String,
         deviceID: String? = nil,
+        groupID: String? = nil,
         volume: Int,
         isRunning: Bool
     ) {
@@ -201,6 +213,7 @@ public struct AppRouteState: Codable, Equatable, Sendable {
         self.displayName = displayName
         self.destinationKind = destinationKind
         self.deviceID = deviceID
+        self.groupID = groupID
         self.volume = volume
         self.isRunning = isRunning
     }
