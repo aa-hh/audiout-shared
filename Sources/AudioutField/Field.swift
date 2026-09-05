@@ -55,9 +55,26 @@ public enum AudioutField {
     public static let defaults: FieldDefaults = file.defaults
     public static let ramps: [String: FieldRamp] = file.ramps
 
+    /// SwiftPM's generated `Bundle.module` accessor checks exactly two places:
+    /// the .app ROOT (where macOS codesign refuses to let a bundle live —
+    /// "unsealed contents present in the bundle root") and the absolute
+    /// build-directory path of the machine that compiled the binary. A
+    /// distributed Mac app has neither — the resource bundle ships in
+    /// Contents/Resources — so check there first. `Bundle.module` stays as the
+    /// fallback for dev builds, tests, and iOS, where bundles do land at the
+    /// .app root.
+    private static let bundle: Bundle = {
+        if let url = Bundle.main.resourceURL?
+            .appendingPathComponent("AudioutShared_AudioutField.bundle"),
+           let shipped = Bundle(url: url) {
+            return shipped
+        }
+        return Bundle.module
+    }()
+
     private static let file: FieldFile = {
-        guard let url = Bundle.module.url(forResource: "field", withExtension: "json") else {
-            fatalError("AudioutField: field.json is missing from Bundle.module — the package is broken.")
+        guard let url = bundle.url(forResource: "field", withExtension: "json") else {
+            fatalError("AudioutField: field.json is missing from its resource bundle — the package is broken.")
         }
         do {
             let data = try Data(contentsOf: url)
