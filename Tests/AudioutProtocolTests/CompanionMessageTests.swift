@@ -173,6 +173,17 @@ import Testing
         #expect(try roundTrip(message) == message)
     }
 
+    @Test func alignmentAppliedRoundTripsWithSource() throws {
+        let message = CompanionMessage.alignmentApplied(deviceID: "device-2", measuredMs: 40.5, correctedMs: 40, source: AlignmentSource.firstPass)
+        let reloaded = try roundTrip(message)
+        #expect(reloaded == message)
+        guard case .alignmentApplied(_, _, _, let source) = reloaded else {
+            Issue.record("expected .alignmentApplied")
+            return
+        }
+        #expect(source == AlignmentSource.firstPass)
+    }
+
     @Test func appIconsRoundTrips() throws {
         let message = CompanionMessage.appIcons(
             page: 1,
@@ -223,6 +234,45 @@ import Testing
         let data = try JSONEncoder().encode(device)
         let reloaded = try JSONDecoder().decode(DeviceState.self, from: data)
         #expect(reloaded == device)
+    }
+
+    @Test func deviceStateWithSourceRoundTrips() throws {
+        let device = DeviceState(
+            id: "device-3",
+            name: "Kitchen JBL",
+            kind: "bluetooth",
+            iconSymbolName: "hifispeaker.fill",
+            isAvailable: true,
+            supportsAirPlay2: false,
+            isLocalDevice: false,
+            volume: 60,
+            isMuted: false,
+            isSelected: true,
+            isMainOutMember: false,
+            connection: DeviceState.ConnectionInfo(state: "connected"),
+            alignment: DeviceState.AlignmentState(
+                status: "tuned",
+                referenceID: "device-1",
+                clockState: "steady",
+                source: AlignmentSource.fromLastTime
+            )
+        )
+        let data = try JSONEncoder().encode(device)
+        let reloaded = try JSONDecoder().decode(DeviceState.self, from: data)
+        #expect(reloaded == device)
+        #expect(reloaded.alignment?.source == AlignmentSource.fromLastTime)
+    }
+
+    /// Old-peer compatibility: an `AlignmentState` JSON object with no
+    /// `source` key at all (a pre-T2 Mac) must still decode, with `source`
+    /// reading `nil` (treat as `"measured"`).
+    @Test func alignmentStateWithoutSourceKeyDecodes() throws {
+        let json = """
+        {"status": "tuned", "referenceID": "device-1", "clockState": "steady"}
+        """
+        let alignment = try JSONDecoder().decode(DeviceState.AlignmentState.self, from: Data(json.utf8))
+        #expect(alignment.source == nil)
+        #expect(alignment.status == "tuned")
     }
 
     @Test func deviceStateWithNilAlignmentRoundTrips() throws {
@@ -348,7 +398,7 @@ import Testing
     @Test func clientRefusesAWelcomeAdvertisingANewerProtoVersion() throws {
         let envelope = CompanionEnvelope(message: .welcome(serverName: "Mac", protoVersion: CompanionProto.version + 1, snapshot: Self.fullSnapshot(), companionToken: nil))
         let decoded = try CompanionEnvelope.decode(envelope.encoded())
-        guard case .welcome(_, let protoVersion, _, _) = decoded.message else {
+        guard case .welcome(_, let protoVersion, _, _, _) = decoded.message else {
             Issue.record("expected .welcome")
             return
         }
@@ -411,13 +461,14 @@ import Testing
         }}}
         """
         let envelope = try CompanionEnvelope.decode(Data(json.utf8))
-        guard case .welcome(let serverName, let protoVersion, let snapshot, let companionToken) = envelope.message else {
+        guard case .welcome(let serverName, let protoVersion, let snapshot, let companionToken, let serverID) = envelope.message else {
             Issue.record("expected .welcome")
             return
         }
         #expect(serverName == "Alec's Mac")
         #expect(protoVersion == 1)
         #expect(companionToken == nil, "a welcome from a Mac that predates the field decodes as no token")
+        #expect(serverID == nil, "a welcome from a Mac that predates the field decodes as no join id")
         #expect(snapshot.mainOut == MainOutState(kind: "selected"))
         #expect(snapshot.devices.isEmpty)
         #expect(snapshot.activeGroupID == nil)
