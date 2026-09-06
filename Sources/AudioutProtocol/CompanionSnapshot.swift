@@ -43,7 +43,13 @@ public struct DeviceState: Codable, Equatable, Sendable {
     public struct AlignmentState: Codable, Equatable, Sendable {
         /// `"notSet"` | `"tuned"` | `"stale"`.
         public var status: String
-        /// v1: `"reconnected"`.
+        /// Historical: `"reconnected"` and `"measuredWhileSettling"` are no
+        /// longer sent — a reconnected speaker now publishes `"tuned"` with
+        /// ``source`` `"fromLastTime"`, and a measurement taken before the
+        /// speaker settled now publishes `"tuned"` with ``source``
+        /// `"firstPass"`. Only `"moved"` is sent today. Kept as `String` (not
+        /// an enum) so an old capture using either retired value still
+        /// decodes.
         public var staleReason: String?
         /// The audible reference the Mac would measure against; `nil` means
         /// none usable, which gates the sync sheet's CTA off.
@@ -64,19 +70,33 @@ public struct DeviceState: Codable, Equatable, Sendable {
         /// `nil` means the Mac does not report clock state (an older Mac);
         /// treat as `"steady"`.
         public var clockState: String?
+        /// Where this offset came from, so the row can say so without
+        /// computing it: one of ``AlignmentSource``'s four values —
+        /// `"measured"` (a measurement taken once the Mac called the speaker
+        /// settled), `"firstPass"` (a measurement taken before it settled,
+        /// re-checked once ``clockState`` reads `"steady"`), `"fromLastTime"`
+        /// (the offset this speaker had when last measured, applied again on
+        /// reconnect), or `"byEar"` (found through the Mac-only paired-click
+        /// fallback, no microphone). Published by the Mac; the phone never
+        /// computes it. Only meaningful when `status` is `"tuned"`. `nil`
+        /// means the Mac does not report it (an older Mac) — treat as
+        /// `"measured"`.
+        public var source: String?
 
         public init(
             status: String,
             staleReason: String? = nil,
             referenceID: String? = nil,
             settleRemainingSeconds: Int? = nil,
-            clockState: String? = nil
+            clockState: String? = nil,
+            source: String? = nil
         ) {
             self.status = status
             self.staleReason = staleReason
             self.referenceID = referenceID
             self.settleRemainingSeconds = settleRemainingSeconds
             self.clockState = clockState
+            self.source = source
         }
     }
 

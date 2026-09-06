@@ -33,7 +33,12 @@ public enum CompanionMessage: Equatable, Sendable {
     /// `nil` when the Mac has none — an unlicensed or never-checked-in Mac,
     /// or an older Mac whose `welcome` predates the field. It is absent from
     /// the wire when `nil`, so an older phone never sees the key at all.
-    case welcome(serverName: String, protoVersion: Int, snapshot: Snapshot, companionToken: String?)
+    /// `serverID` is a random join id the Mac keeps in its own settings, sent
+    /// so an analytics funnel can link this Mac's events to this phone's —
+    /// it is never the Mac's analytics distinct id and never any identifier
+    /// of the machine itself. `nil` when the Mac predates the field, or (like
+    /// `companionToken`) absent from the wire entirely rather than `null`.
+    case welcome(serverName: String, protoVersion: Int, snapshot: Snapshot, companionToken: String?, serverID: String? = nil)
     /// The hello was valid but this phone isn't approved yet: the Mac is
     /// showing its user an allow/deny prompt, and holds the connection open
     /// (generously — minutes, not the handshake deadline) until they answer.
@@ -63,7 +68,11 @@ public enum CompanionMessage: Equatable, Sendable {
     /// `correctedMs` is the change the Mac made to the stored latency —
     /// `max(0, value) − applied` (signed; `0` when clamping or flooring left
     /// it where it was).
-    case alignmentApplied(deviceID: String, measuredMs: Double, correctedMs: Double)
+    /// `source` is the same ``AlignmentSource`` value ``DeviceState/AlignmentState/source``
+    /// carries, sent here too so the verdict is labelled the moment it lands
+    /// rather than waiting for the next snapshot. `nil` when the Mac predates
+    /// the field; treat as `"measured"`.
+    case alignmentApplied(deviceID: String, measuredMs: Double, correctedMs: Double, source: String? = nil)
     /// The Mac's licence came through while this phone was already
     /// connected: the same token `welcome` carries, sent to every welcomed
     /// client so a phone locked on a token-less welcome unlocks without
@@ -99,6 +108,38 @@ public enum CompanionGoodbyeReason {
     public static let approvalTimedOut = "approvalTimedOut"
 }
 
+/// The allowed values of ``DeviceState/AlignmentState/source`` and
+/// `CompanionMessage.alignmentApplied`'s `source`, so neither peer types the
+/// strings by hand. See the Mac's `docs/adr/0001-remembered-offset-on-reconnect.md`
+/// for why a reconnect keeps the last offset instead of re-measuring, and
+/// `dev/notes/bt-latency-stability-research-2026-09-05.md` for why a
+/// measurement taken before the speaker settles still needs applying at once.
+public enum AlignmentSource {
+    /// A measurement taken after the Mac called the speaker settled.
+    public static let measured = "measured"
+    /// A measurement taken before the speaker settled: applied and labelled
+    /// at once, re-checked once the clock reads steady.
+    public static let firstPass = "firstPass"
+    /// The offset this speaker had when last measured, applied again on
+    /// reconnect until a new measurement replaces it.
+    public static let fromLastTime = "fromLastTime"
+    /// Found through the Mac-only paired-click fallback, no microphone.
+    public static let byEar = "byEar"
+}
+
+/// The two numbers both peers read so the Mac's keep-or-replace decision and
+/// the phone's verdict copy never disagree. See the Mac's
+/// `docs/adr/0001-remembered-offset-on-reconnect.md` and
+/// `dev/notes/bt-latency-stability-research-2026-09-05.md`.
+public enum AlignmentThresholds {
+    /// A re-measurement replaces the stored offset at this many milliseconds
+    /// of difference or more; below it, the stored offset is kept.
+    public static let replaceMs: Double = 10
+    /// The phone tells the user only when the applied correction is at least
+    /// this many milliseconds.
+    public static let tellUserMs: Double = 40
+}
+
 /// The wire envelope every WebSocket text frame carries:
 /// `{"v": Int, "type": String, "payload": {...}}`. `v` is the SENDER's
 /// `CompanionProto.version` — check it (or `hello`/`welcome`'s own
@@ -132,12 +173,12 @@ extension CompanionEnvelope: Codable {
     private enum PayloadKeys: String, CodingKey {
         case clientID, clientName, protoVersion
         case requestID, command
-        case serverName, snapshot, companionToken
+        case serverName, snapshot, companionToken, serverID
         case applied, refusalReason, autoSwappedCurrentDevice
         case reason
         case page, pageCount, icons
         case deviceID
-        case measuredMs, correctedMs
+        case measuredMs, correctedMs, source
     }
 
     private enum TypeName: String {
@@ -174,7 +215,8 @@ extension CompanionEnvelope: Codable {
                 serverName: try payload.decode(String.self, forKey: .serverName),
                 protoVersion: try payload.decode(Int.self, forKey: .protoVersion),
                 snapshot: try payload.decode(Snapshot.self, forKey: .snapshot),
-                companionToken: try payload.decodeIfPresent(String.self, forKey: .companionToken)
+                companionToken: try payload.decodeIfPresent(String.self, forKey: .companionToken),
+                serverID: try payload.decodeIfPresent(String.self, forKey: .serverID)
             )
         case .awaitingApproval:
             message = .awaitingApproval
@@ -203,7 +245,8 @@ extension CompanionEnvelope: Codable {
             message = .alignmentApplied(
                 deviceID: try payload.decode(String.self, forKey: .deviceID),
                 measuredMs: try payload.decode(Double.self, forKey: .measuredMs),
-                correctedMs: try payload.decode(Double.self, forKey: .correctedMs)
+                correctedMs: try payload.decode(Double.self, forKey: .correctedMs),
+                source: try payload.decodeIfPresent(String.self, forKey: .source)
             )
         case .companionToken:
             message = .companionToken(try payload.decode(String.self, forKey: .companionToken))
@@ -225,13 +268,14 @@ extension CompanionEnvelope: Codable {
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(requestID, forKey: .requestID)
             try payload.encode(command, forKey: .command)
-        case .welcome(let serverName, let protoVersion, let snapshot, let companionToken):
+        case .welcome(let serverName, let protoVersion, let snapshot, let companionToken, let serverID):
             try c.encode(TypeName.welcome.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(serverName, forKey: .serverName)
             try payload.encode(protoVersion, forKey: .protoVersion)
             try payload.encode(snapshot, forKey: .snapshot)
             try payload.encodeIfPresent(companionToken, forKey: .companionToken)
+            try payload.encodeIfPresent(serverID, forKey: .serverID)
         case .awaitingApproval:
             try c.encode(TypeName.awaitingApproval.rawValue, forKey: .type)
             // Empty payload object — every type carries one (decode reads the
@@ -266,12 +310,13 @@ extension CompanionEnvelope: Codable {
             try c.encode(TypeName.alignmentProbeFinished.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(deviceID, forKey: .deviceID)
-        case .alignmentApplied(let deviceID, let measuredMs, let correctedMs):
+        case .alignmentApplied(let deviceID, let measuredMs, let correctedMs, let source):
             try c.encode(TypeName.alignmentApplied.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(deviceID, forKey: .deviceID)
             try payload.encode(measuredMs, forKey: .measuredMs)
             try payload.encode(correctedMs, forKey: .correctedMs)
+            try payload.encodeIfPresent(source, forKey: .source)
         case .companionToken(let token):
             try c.encode(TypeName.companionToken.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
