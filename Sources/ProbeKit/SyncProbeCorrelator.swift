@@ -68,21 +68,22 @@ public enum SyncProbe {
         public var duration: Double
         /// Raised-cosine fade applied at both ends, so the probe starts and
         /// ends without a click that would smear the correlation peak (and
-        /// annoy the listener).
+        /// annoy the listener). 80 ms removes the click at each end; the
+        /// level is the Mac's, not this package's (docs/adr/0001-quieter-sweeps.md).
         public var fadeDuration: Double
 
         /// The Bluetooth lane — the one heard from across the room, hence the
         /// high band (see the type note).
         public static func upSweep(sampleRate: Double, duration: Double = 1.0) -> SweepDesign {
             SweepDesign(sampleRate: sampleRate, startHz: 3_200, endHz: 10_000,
-                        duration: duration, fadeDuration: 0.01)
+                        duration: duration, fadeDuration: 0.08)
         }
 
         /// The engine/Mac lane — nearest the microphone, so it takes the low
         /// band and its noisier floor.
         public static func downSweep(sampleRate: Double, duration: Double = 1.0) -> SweepDesign {
             SweepDesign(sampleRate: sampleRate, startHz: 2_000, endHz: 500,
-                        duration: duration, fadeDuration: 0.01)
+                        duration: duration, fadeDuration: 0.08)
         }
     }
 
