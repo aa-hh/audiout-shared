@@ -25,8 +25,12 @@ How late one speaker sounds relative to the reference, in milliseconds, positive
 _Avoid_: Trim, delay, latency, sync value
 
 **Settled**:
-The Mac's verdict that a Bluetooth speaker's delay has stopped jumping since it connected, so a measurement taken now will hold.
-_Avoid_: Stable, ready, warmed up, clock locked
+The Mac's verdict that a Bluetooth speaker's delay has stopped jumping since it connected, so a measurement taken now will hold. The wire's own words for the two states are `settling` and `steady`; user-facing copy says settled or still settling.
+_Avoid_: Stable, ready, warmed up, clock locked, steady (in copy)
+
+**Offset source**:
+Where a speaker's applied offset came from: measured, first pass, from last time, or by ear. Published by the Mac, read by the phone, never computed on the phone.
+_Avoid_: Provenance, origin, kind
 
 **First pass**:
 A measurement taken before the speaker settled. Applied at once, labelled, and re-checked by the phone when the Mac says the speaker has settled.
