@@ -96,6 +96,23 @@ itself.
 | `sync:recheck_accepted` | phone | `mac_id`, `speaker_kind` | see above | The phone's offer to re-check a first-pass measurement (once the Mac reports the speaker settled) is accepted. |
 | `sync:by_ear_nudged` | phone | `mac_id`, `speaker_kind` | see above | The phone nudges the user toward the Mac's Align by ear fallback (for example, after a probe run cannot get a confident answer). |
 
+## Diagnostic logs
+
+Alongside events, the Mac app and the licence server send PostHog Logs
+(OpenTelemetry log records, EU cloud, 14-day retention). Same project, same
+rules as events: no device name, person's name, email, bundle identifier or
+network identifier. The phone sends none yet.
+
+| `service.name` | sender | gate | what a line is |
+|---|---|---|---|
+| `audiout-mac` | Mac app | the "Share anonymous usage statistics" opt-in, same as events | one `Telemetry` line: message `category.event` (for example `cast.cast_launch_ok`), attributes = the line's fields plus `category`, minus any device field (`Analytics.deviceKeys` in the Mac repo). The two per-second Cast samplers stay local. |
+| `license-server` | licence server worker | always on; no PII by construction | one `log.*` call from `src/log.ts`: a fixed message, attributes carry ids and outcomes. Emails and IPs appear only as `to_hash` / `ip_hash` (salted SHA-256, first 8 bytes). Never a key or token. |
+| `website` | website worker | always on | errors only: `path`, `method`, `error`. |
+
+Resource attributes on every record: `service.name`, `deployment.environment`
+(`production`, `staging`, `development`), and on the Mac `service.version`.
+Filter the Logs view by `service.name` first.
+
 ## Notes on shared properties
 
 - `offset_source` (`measured`, `firstPass`, `fromLastTime`, and, on the phone
