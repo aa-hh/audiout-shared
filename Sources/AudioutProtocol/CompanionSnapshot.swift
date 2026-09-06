@@ -43,13 +43,13 @@ public struct DeviceState: Codable, Equatable, Sendable {
     public struct AlignmentState: Codable, Equatable, Sendable {
         /// `"notSet"` | `"tuned"` | `"stale"`.
         public var status: String
-        /// Historical: `"reconnected"` and `"measuredWhileSettling"` are no
-        /// longer sent — a reconnected speaker now publishes `"tuned"` with
-        /// ``source`` `"fromLastTime"`, and a measurement taken before the
-        /// speaker settled now publishes `"tuned"` with ``source``
-        /// `"firstPass"`. Only `"moved"` is sent today. Kept as `String` (not
-        /// an enum) so an old capture using either retired value still
-        /// decodes.
+        /// `"moved"` or `"measuredWhileSettling"`. `"reconnected"` is no
+        /// longer sent: a reconnected speaker publishes `"tuned"` with
+        /// ``source`` `"fromLastTime"`. A measurement taken before the
+        /// speaker settled publishes `"stale"` with this reason and ``source``
+        /// `"firstPass"`, so a phone that predates ``source`` still offers a
+        /// re-check. Kept as `String` (not an enum) so an old capture using
+        /// the retired value still decodes.
         public var staleReason: String?
         /// The audible reference the Mac would measure against; `nil` means
         /// none usable, which gates the sync sheet's CTA off.
@@ -78,9 +78,9 @@ public struct DeviceState: Codable, Equatable, Sendable {
         /// (the offset this speaker had when last measured, applied again on
         /// reconnect), or `"byEar"` (found through the Mac-only paired-click
         /// fallback, no microphone). Published by the Mac; the phone never
-        /// computes it. Only meaningful when `status` is `"tuned"`. `nil`
-        /// means the Mac does not report it (an older Mac) — treat as
-        /// `"measured"`.
+        /// computes it. Present whenever `status` is not `"notSet"`: a first
+        /// pass rides `"stale"`, the other three ride `"tuned"`. `nil` means
+        /// the Mac does not report it (an older Mac); treat as `"measured"`.
         public var source: String?
 
         public init(
