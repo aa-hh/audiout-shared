@@ -14,9 +14,9 @@ which one.
 
 Consent differs by app and is not symmetric. The phone is opt-out: analytics
 are on by default, with a switch to turn them off. The Mac is opt-in: off by
-default, on only after the user checks the "Share Usage Counts" box. A joined
-report that lines up a Mac and a phone by `mac_id` only ever covers Macs
-whose owner opted in — most phones will have no matching Mac row.
+default, on only after the user turns on "Share anonymous usage statistics". A
+joined report that lines up a Mac and a phone by `mac_id` only ever covers
+Macs whose owner opted in — most phones will have no matching Mac row.
 
 `mac_id` is the join key between a Mac and the phones connected to it. It is
 the value the Mac sends as `serverID` in its `welcome` message when a phone
@@ -78,11 +78,11 @@ itself.
 | `bt_sync:wizard_started` | mac | `target`, `door` | `target`: `local` or `bluetooth`; `door`: which of the four entry points opened it | The by-ear alignment wizard starts for a speaker. |
 | `bt_sync:wizard_finished` | mac | — | — | The by-ear alignment wizard is completed (a result is kept). |
 | `bt_sync:wizard_abandoned` | mac | `target_lost` | `true`, `false` | The by-ear alignment wizard is closed without finishing; `target_lost` is true if the speaker disappeared mid-run. |
-| `onboarding:usage_stats_opted_in` | mac | — | — | The user checks "Share Usage Counts" during first-run setup. This is the event that makes every other opt-in Mac event start flowing; it can only ever be seen after the fact, from the presence of later events. |
+| `onboarding:usage_stats_opted_in` | mac | — | — | The user turns on "Share anonymous usage statistics" during first-run setup, with the card's "Share Usage Counts" button. This is the event that makes every other opt-in Mac event start flowing; it can only ever be seen after the fact, from the presence of later events. |
 | `onboarding:setup_completed` | mac | — | — | First-run setup is marked complete. |
 | `onboarding:step_granted` | mac | `step` | `audio`, `local_network`, `bluetooth`, `speaker_sync`, `remote_control`, `audiout_remote`, `usage_stats` | A first-run setup step turns complete while the Setup window is open (a grant landing, or the iPhone connecting). Not sent for a step already complete when the window opened. Steps before the usage-statistics card are held in memory and sent only once the user opts in during that same session; a decline or quit drops them. |
 | `onboarding:step_skipped` | mac | `step` | `bluetooth`, `remote_control`, `audiout_remote`, `usage_stats` | The user passes on a skippable setup step (Skip for now, or No Thanks on usage statistics). Same hold-until-opt-in rule as `onboarding:step_granted`, so a usage-statistics decline is never actually sent. |
-| `bt_sync:link_settled` | mac | `speaker`, `codec`, `jump_count`, `settle_seconds_bucket`, `offset_ms_bucket`, `offset_source`, `speaker_kind` | `speaker`: a per-install hash or index, never the Bluetooth UID itself; `codec`: the negotiated Bluetooth codec, absent if it cannot be read; `jump_count`: number of clock jumps since this connection; `settle_seconds_bucket`: seconds from connect to settled as `0-9`, `10-29`, `30-59` or `60+`, absent when the 60 s floor produced the verdict rather than ten jump-free seconds; `offset_ms_bucket`: see the phone table below; `offset_source`: see below; `speaker_kind`: `bluetooth` (this event only ever fires for Bluetooth speakers) | Once per Bluetooth connection, the first time the Mac's clock verdict reaches settled, or when the link drops before that happens. Opt-in only; never sent for a user who has not checked "Share Usage Counts". |
+| `bt_sync:link_settled` | mac | `speaker`, `codec`, `jump_count`, `settle_seconds_bucket`, `offset_ms_bucket`, `offset_source`, `speaker_kind` | `speaker`: a per-install index (a plain counter, different for every copy of Audiout), never the Bluetooth UID, address or name; `codec`: the negotiated Bluetooth codec, absent if it cannot be read; `jump_count`: number of clock jumps since this connection; `settle_seconds_bucket`: seconds from connect to settled as `0-9`, `10-29`, `30-59` or `60+`, absent when the 60 s floor produced the verdict rather than ten jump-free seconds; `offset_ms_bucket`: see the phone table below; `offset_source`: see below; `speaker_kind`: `bluetooth` (this event only ever fires for Bluetooth speakers) | Once per Bluetooth connection, the first time the Mac's clock verdict reaches settled, or when the link drops before that happens. Opt-in only; never sent for a user who has not turned on "Share anonymous usage statistics". |
 | `bt_sync:offset_applied` | mac | `offset_source`, `offset_ms_bucket` | `offset_source`: `measured`, `firstPass`, `fromLastTime`; `offset_ms_bucket`: see the phone table below | Each time the Mac applies an offset to a Bluetooth speaker, whether from a fresh measurement, a first-pass measurement, or the value remembered from the speaker's last connection. Opt-in only. |
 | `remote_invite:sheet_shown` | mac | `state` | `allow_off`, `qr`, `connected` | The alignment wizard sheet's "Measure with your iPhone" panel is shown, with which of its three visible states it opened in. |
 | `remote_invite:settings_link_opened` | mac | — | — | The "Open audiout.app/remote" button under Settings' Allow switch is clicked. |
@@ -100,20 +100,42 @@ itself.
 
 ## Diagnostic logs
 
-Alongside events, the Mac app and the licence server send PostHog Logs
+Alongside events, the licence server and the website send PostHog Logs
 (OpenTelemetry log records, EU cloud, 14-day retention). Same project, same
 rules as events: no device name, person's name, email, bundle identifier or
-network identifier. The phone sends none yet.
+network identifier. The Mac app sends no logs: its diagnostic log is written
+on the Mac and stays there. The phone sends none either.
 
 | `service.name` | sender | gate | what a line is |
 |---|---|---|---|
-| `audiout-mac` | Mac app | the "Share anonymous usage statistics" opt-in, same as events | one `Telemetry` line: message `category.event` (for example `cast.cast_launch_ok`), attributes = the line's fields plus `category`, minus any device field (`Analytics.deviceKeys` in the Mac repo). The two per-second Cast samplers stay local. |
 | `license-server` | licence server worker | always on; no PII by construction | one `log.*` call from `src/log.ts`: a fixed message, attributes carry ids and outcomes. Emails and IPs appear only as `to_hash` / `ip_hash` (salted SHA-256, first 8 bytes). Never a key or token. |
 | `website` | website worker | always on | errors only: `path`, `method`, `error`. |
 
-Resource attributes on every record: `service.name`, `deployment.environment`
-(`production`, `staging`, `development`), and on the Mac `service.version`.
-Filter the Logs view by `service.name` first.
+Resource attributes on every record: `service.name` and
+`deployment.environment` (`production`, `staging`, `development`). Filter the
+Logs view by `service.name` first.
+
+### Failure reports from the Mac app
+
+Instead of logs, the Mac app sends the failures a user felt to PostHog error
+tracking, as `$exception` events. Same gate as every Mac event: the "Share
+anonymous usage statistics" opt-in, off by default. The exception type is one
+of the six names below, each written into the Mac's source as a literal, so no
+runtime value can become an exception's identity. Only the properties listed
+here leave the Mac; the speaker id, the file path and the raw error text stay
+in the local log. That type is the only locator a report carries; the matching
+line in the Mac's local `telemetry.jsonl`, at `level:error`, holds the detail.
+Unhandled crashes are reported by the PostHog SDK itself and are not in this
+list.
+
+| exception type | properties | allowed values | when it fires |
+|---|---|---|---|
+| `airplay:session_failed` | `state`, `cause`, `wasStreaming` | `state`: `failed`, `passwordRequired`; `cause`: `authRequired`, `droppedMidStream`, `unknown`; `wasStreaming`: `true`, `false` | A live AirPlay session dies while the user still wants that speaker on. |
+| `airplay:connect_failed` | `cause` | `timingUnavailable`, `authRequired`, `timedOut`, `unknown` | An AirPlay speaker fails to connect. |
+| `capture:whole_system_failed` | `kind`, `retrying` | `kind`: `tap_creation_failed`, `aggregate_device_failed`, `format_read_failed`, `device_lost`, `os_unsupported`; `retrying`: `true`, `false` | System audio capture fails while capture is wanted. |
+| `settings:save_failed` | `domain`, `code` | `domain`: the Cocoa error domain; `code`: the Cocoa error code | A settings file cannot be written. The error's localised description stays local, because it can carry a file path. |
+| `settings:file_corrupt` | `files` | a comma-joined list of Audiout's own settings file names, never a user path | Unreadable settings files are set aside at launch. |
+| `bt:connect_failed` | `reason` | `timeout`, `no_audio_endpoint`, or a Bluetooth status code as `0x` hex | A Bluetooth speaker fails to connect. |
 
 ## Notes on shared properties
 
