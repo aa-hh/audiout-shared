@@ -98,20 +98,41 @@ itself.
 
 ## Diagnostic logs
 
-Alongside events, the Mac app and the licence server send PostHog Logs
+Alongside events, the licence server and the website send PostHog Logs
 (OpenTelemetry log records, EU cloud, 14-day retention). Same project, same
 rules as events: no device name, person's name, email, bundle identifier or
-network identifier. The phone sends none yet.
+network identifier. The Mac app sends no logs: its diagnostic log is written
+on the Mac and stays there. The phone sends none either.
 
 | `service.name` | sender | gate | what a line is |
 |---|---|---|---|
-| `audiout-mac` | Mac app | the "Share anonymous usage statistics" opt-in, same as events | one `Telemetry` line: message `category.event` (for example `cast.cast_launch_ok`), attributes = the line's fields plus `category`, minus any device field (`Analytics.deviceKeys` in the Mac repo). The two per-second Cast samplers stay local. |
 | `license-server` | licence server worker | always on; no PII by construction | one `log.*` call from `src/log.ts`: a fixed message, attributes carry ids and outcomes. Emails and IPs appear only as `to_hash` / `ip_hash` (salted SHA-256, first 8 bytes). Never a key or token. |
 | `website` | website worker | always on | errors only: `path`, `method`, `error`. |
 
-Resource attributes on every record: `service.name`, `deployment.environment`
-(`production`, `staging`, `development`), and on the Mac `service.version`.
-Filter the Logs view by `service.name` first.
+Resource attributes on every record: `service.name` and
+`deployment.environment` (`production`, `staging`, `development`). Filter the
+Logs view by `service.name` first.
+
+### Failure reports from the Mac app
+
+Instead of logs, the Mac app sends the failures a user felt to PostHog error
+tracking, as `$exception` events. Same gate as every Mac event: the "Share
+anonymous usage statistics" opt-in, off by default. The exception type is one
+of the six names below, each written into the Mac's source as a literal, so no
+runtime value can become an exception's identity. Only the properties listed
+here leave the Mac; the speaker id, the file path and the raw error text stay
+in the local log. Each exception also carries a stack trace of Audiout's own
+code. Unhandled crashes are reported by the PostHog SDK itself and are not in
+this list.
+
+| exception type | properties | allowed values | when it fires |
+|---|---|---|---|
+| `airplay:session_failed` | `state`, `cause`, `wasStreaming` | `state`: `failed`, `passwordRequired`; `cause`: `authRequired`, `droppedMidStream`, `unknown`; `wasStreaming`: `true`, `false` | A live AirPlay session dies while the user still wants that speaker on. |
+| `airplay:connect_failed` | `cause` | `timingUnavailable`, `authRequired`, `timedOut`, `unknown` | An AirPlay speaker fails to connect. |
+| `capture:whole_system_failed` | `kind`, `retrying` | `kind`: the capture error's case name; `retrying`: `true`, `false` | System audio capture fails while capture is wanted. |
+| `settings:save_failed` | `domain`, `code` | `domain`: the Cocoa error domain; `code`: the Cocoa error code | A settings file cannot be written. The error's localised description stays local, because it can carry a file path. |
+| `settings:file_corrupt` | `files` | a comma-joined list of Audiout's own settings file names, never a user path | Unreadable settings files are set aside at launch. |
+| `bt:connect_failed` | `reason` | `timeout`, `no_audio_endpoint`, or a Bluetooth status code as `0x` hex | A Bluetooth speaker fails to connect. |
 
 ## Notes on shared properties
 
