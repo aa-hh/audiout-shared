@@ -94,7 +94,7 @@ itself.
 | `sync:measure_tapped` | phone | `mac_id`, `speaker_kind` | see above | The Measure (tuning fork) button is tapped, starting a probe run. |
 | `sync:verdict` | phone | `mac_id`, `speaker_kind`, `offset_source`, `settled`, `offset_ms_bucket`, `verdict` | `offset_source`: `measured`, `firstPass`, `fromLastTime`, `byEar`; `settled`: `true`/`false`, the Mac's clock verdict for that speaker at this moment; `offset_ms_bucket`: `0-9`, `10-39`, `40-99`, `100+` (absolute value, in milliseconds); `verdict`: `applied`, `firstPass`, `refused` | A probe run finishes and the phone shows its result. |
 | `sync:recheck_accepted` | phone | `mac_id`, `speaker_kind` | see above | The phone's offer to re-check a first-pass measurement (once the Mac reports the speaker settled) is accepted. |
-| `sync:by_ear_nudged` | phone | `mac_id`, `speaker_kind` | see above | The phone nudges the user toward the Mac's Align by ear fallback (for example, after a probe run cannot get a confident answer). |
+| `sync:by_ear_nudged` | phone | `mac_id`, `speaker_kind` | see above | The user moves the by-ear slider one step in the sync sheet. One event per nudge, so a run's count says how much fiddling it took. Owner ruling 2026-09-10; the earlier reading (once per run that could not get a confident answer) is retired. |
 
 ## Notes on shared properties
 
