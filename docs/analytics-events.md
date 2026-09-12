@@ -90,6 +90,7 @@ itself.
 | `bt_sync:wizard_started` | mac | `target`, `door` | `target`: `local` or `bluetooth`; `door`: which of the four entry points opened it | The by-ear alignment wizard starts for a speaker. |
 | `bt_sync:wizard_finished` | mac | — | — | The by-ear alignment wizard is completed (a result is kept). |
 | `bt_sync:wizard_abandoned` | mac | `target_lost` | `true`, `false` | The by-ear alignment wizard is closed without finishing; `target_lost` is true if the speaker disappeared mid-run. |
+| `bt_volume:hardware_toggled` | mac | `enabled` | `true`, `false` | The "Control speaker volume" checkbox on a Bluetooth speaker's detail page is flipped, and the new choice was saved to disk. Not sent when the save fails. |
 | `onboarding:usage_stats_opted_in` | mac | — | — | The user turns on "Share anonymous usage statistics" during first-run setup, with the card's "Share Usage Counts" button. This is the event that makes every other opt-in Mac event start flowing; it can only ever be seen after the fact, from the presence of later events. |
 | `onboarding:setup_completed` | mac | — | — | First-run setup is marked complete. |
 | `onboarding:step_granted` | mac | `step` | `audio`, `local_network`, `bluetooth`, `speaker_sync`, `remote_control`, `audiout_remote`, `usage_stats` | A first-run setup step turns complete while the Setup window is open (a grant landing, or the iPhone connecting). Not sent for a step already complete when the window opened. Steps before the usage-statistics card are held in memory and sent only once the user opts in during that same session; a decline or quit drops them. |
@@ -153,7 +154,7 @@ Logs view by `service.name` first.
 Instead of logs, the Mac app sends the failures a user felt to PostHog error
 tracking, as `$exception` events. Same gate as every Mac event: the "Share
 anonymous usage statistics" opt-in, off by default. The exception type is one
-of the six names below, each written into the Mac's source as a literal, so no
+of the eight names below, each written into the Mac's source as a literal, so no
 runtime value can become an exception's identity. Only the properties listed
 here leave the Mac; the speaker id, the file path and the raw error text stay
 in the local log. That type is the only locator a report carries; the matching
@@ -169,6 +170,8 @@ list.
 | `settings:save_failed` | `domain`, `code` | `domain`: the Cocoa error domain; `code`: the Cocoa error code | A settings file cannot be written. The error's localised description stays local, because it can carry a file path. |
 | `settings:file_corrupt` | `files` | a comma-joined list of Audiout's own settings file names, never a user path | Unreadable settings files are set aside at launch. |
 | `bt:connect_failed` | `reason` | `timeout`, `no_audio_endpoint`, or a Bluetooth status code as `0x` hex | A Bluetooth speaker fails to connect. |
+| `bt_volume:hardware_write_failed` | — | — | Setting a Bluetooth speaker's own volume fails, so that speaker's slider goes back to scaling the sound on the Mac for the rest of the session. The speaker id stays local. |
+| `bt_volume:store_write_failed` | — | — | The "Control speaker volume" choices cannot be saved to disk. The choice still holds for the session. The error text stays local, because it can carry a file path. |
 
 ## Notes on shared properties
 
