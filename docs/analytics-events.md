@@ -90,6 +90,7 @@ itself.
 | `bt_sync:wizard_started` | mac | `target`, `door` | `target`: `local` or `bluetooth`; `door`: which of the four entry points opened it | The by-ear alignment wizard starts for a speaker. |
 | `bt_sync:wizard_finished` | mac | — | — | The by-ear alignment wizard is completed (a result is kept). |
 | `bt_sync:wizard_abandoned` | mac | `target_lost` | `true`, `false` | The by-ear alignment wizard is closed without finishing; `target_lost` is true if the speaker disappeared mid-run. |
+| `bt_sync:drift_corrected` | mac | `action`, `placement`, `magnitude_ms_bucket`, `surfaced` | `action`: `correct`, `swap_recorrect`; `placement`: `gap`, `slew`; `magnitude_ms_bucket`: `0-9`, `10-39`, `40-99`, `100+`; `surfaced`: `true`, `false` | The passive drift tracker moves a Bluetooth speaker's alignment after measuring it from the playing music. Fired after the move lands, never before. No device names or ids. |
 | `bt_volume:hardware_toggled` | mac | `enabled` | `true`, `false` | The "Control speaker volume" checkbox on a Bluetooth speaker's detail page is flipped, and the new choice was saved to disk. Not sent when the save fails. |
 | `onboarding:usage_stats_opted_in` | mac | — | — | The user turns on "Share anonymous usage statistics" during first-run setup, with the card's "Share Usage Counts" button. This is the event that makes every other opt-in Mac event start flowing; it can only ever be seen after the fact, from the presence of later events. |
 | `onboarding:setup_completed` | mac | — | — | First-run setup is marked complete. |
