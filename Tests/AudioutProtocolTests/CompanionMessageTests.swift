@@ -339,6 +339,7 @@ import Testing
         .revertAlignmentNudge(targetID: "device-2"),
         .clearAlignmentTuning(targetID: "device-2"),
         .playAlignmentDemo(targetID: "device-2"),
+        .activateLicenseKey(key: "AUDT-AAAAA-BBBBB-CCCCC-DDDDD"),
     ])
     func everyCommandCaseRoundTrips(_ command: CompanionCommand) throws {
         let data = try JSONEncoder().encode(command)
@@ -442,6 +443,14 @@ import Testing
         """
         let envelope = try CompanionEnvelope.decode(Data(json.utf8))
         #expect(envelope.message == .command(requestID: "req-1", command: .setDeviceSelected(id: "device-1", selected: true)))
+    }
+
+    @Test func activateLicenseKeyCommandDecodesFromAHandWrittenWireLiteral() throws {
+        let json = """
+        {"command":"activateLicenseKey","key":"AUDT-AAAAA-BBBBB-CCCCC-DDDDD"}
+        """
+        let command = try JSONDecoder().decode(CompanionCommand.self, from: Data(json.utf8))
+        #expect(command == .activateLicenseKey(key: "AUDT-AAAAA-BBBBB-CCCCC-DDDDD"))
     }
 
     @Test func welcomeDecodesFromAHandWrittenWireLiteral() throws {

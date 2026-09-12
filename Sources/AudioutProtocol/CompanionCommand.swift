@@ -79,6 +79,10 @@ public enum CompanionCommand: Equatable, Sendable {
     /// then current value, on target + reference.
     case playAlignmentDemo(targetID: String)
 
+    /// Sent phone → Mac: carries a licence key bought in the phone app. The
+    /// Mac answers with a `commandResult`.
+    case activateLicenseKey(key: String)
+
     /// An unrecognized `"command"` string — e.g. a newer phone talking to an
     /// older Mac. Decodes without throwing so the server can answer with a
     /// failed `commandResult` instead of dropping the connection.
@@ -98,6 +102,7 @@ extension CompanionCommand: Codable {
         case offsetMs, confidence
         case active
         case deltaMs
+        case key
     }
 
     private enum Name: String {
@@ -109,6 +114,7 @@ extension CompanionCommand: Codable {
         case startAlignmentProbe, cancelAlignmentProbe, reportAlignmentMeasurement
         case setAlignmentTick, nudgeAlignmentTrim, revertAlignmentNudge
         case clearAlignmentTuning, playAlignmentDemo
+        case activateLicenseKey
     }
 
     public init(from decoder: Decoder) throws {
@@ -183,6 +189,8 @@ extension CompanionCommand: Codable {
             self = .clearAlignmentTuning(targetID: try c.decode(String.self, forKey: .id))
         case .playAlignmentDemo:
             self = .playAlignmentDemo(targetID: try c.decode(String.self, forKey: .id))
+        case .activateLicenseKey:
+            self = .activateLicenseKey(key: try c.decode(String.self, forKey: .key))
         }
     }
 
@@ -281,6 +289,9 @@ extension CompanionCommand: Codable {
         case .playAlignmentDemo(let targetID):
             try c.encode(Name.playAlignmentDemo.rawValue, forKey: .command)
             try c.encode(targetID, forKey: .id)
+        case .activateLicenseKey(let key):
+            try c.encode(Name.activateLicenseKey.rawValue, forKey: .command)
+            try c.encode(key, forKey: .key)
         case .unknown(let name):
             // Round-trips as whatever it decoded from — re-encoding an
             // `.unknown` just forwards the original unrecognized name with

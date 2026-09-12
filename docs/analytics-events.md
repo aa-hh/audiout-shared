@@ -42,7 +42,7 @@ itself.
 | `takeover:retry_tapped` | mac | — | — | The main-mix "Speakers unreachable" strip's Try Again button is clicked. |
 | `license:buy_link_opened` | mac | `source` | `mixer_note`, `license_sheet`, `settings`, `gate` | A Buy link is opened, from any of the four places it appears. |
 | `license:removed` | mac | — | — | The user removes their license key from the license sheet. |
-| `license:key_submitted` | mac | `outcome`, `source` (only from the gate) | `outcome`: the verification result — exactly `active`, `revoked`, `unknown`, `invalid`, `unreachable`, `no_server`, `no_key`; `source`: `gate` | A pasted or typed license key is submitted, from the settings sheet or the first-run gate. |
+| `license:key_submitted` | mac | `outcome`, `source` (only from the gate) | `outcome`: the verification result — exactly `active`, `revoked`, `unknown`, `invalid`, `unreachable`, `no_server`, `no_key`; `source`: `gate`, `phone` | A pasted or typed license key is submitted, from the settings sheet, the first-run gate, or a key sent by the connected iPhone. |
 | `license:enter_sheet_opened` | mac | — | — | The "Enter a license key" sheet opens from Settings. |
 | `license:gate_shown` | mac | — | — | The first-run license gate window is shown. |
 | `license:trial_started` | mac | — | — | The first-run gate's Start Trial button is clicked. |
@@ -130,7 +130,7 @@ named by the Paddle transaction id instead of an install.
 | `trial_refused` | server | `state` | `live`, `expired`, `converted` | A device asks for a trial and is refused because it already has one in that state. |
 | `trial_expired` | server | `converted` | `false` | The daily cron marks a trial expired without it having converted. |
 | `trial_converted` | server | `days_into_trial`, `after_expiry` | `days_into_trial`: whole days from trial start to purchase; `after_expiry`: `true`/`false`, whether the trial had already expired at purchase | A trial key's purchase webhook lands and the trial is marked converted. |
-| `license_purchased` | server | `from_trial`, `source` | `from_trial`: `true`/`false`; `source`: where the purchase came from | A purchase webhook issues a paid key, once per sale. |
+| `license_purchased` | server | `from_trial`, `source` | `from_trial`: `true`/`false`; `source`: where the purchase came from, including `apple` for an App Store purchase | A purchase webhook issues a paid key, once per sale. |
 | `build_downloaded` | server | `major` | the downloaded build's major version | A build is downloaded. |
 
 ## Diagnostic logs
