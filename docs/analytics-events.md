@@ -13,10 +13,16 @@ place those words are defined; this file only says which property carries
 which one.
 
 Consent differs by app and is not symmetric. The phone is opt-out: analytics
-are on by default, with a switch to turn them off. The Mac is opt-in: off by
-default, on only after the user turns on "Share anonymous usage statistics". A
-joined report that lines up a Mac and a phone by `mac_id` only ever covers
-Macs whose owner opted in — most phones will have no matching Mac row.
+are on by default, with a switch to turn them off. The Mac is opt-out too, but
+only through the free trial: analytics are on from first launch, with a
+Settings switch to turn them off that sticks once flipped. A paid user is
+asked once — a direct buyer sees the onboarding usage-stats card, a trial
+converter sees a one-time popover right after their paid key is accepted —
+and declining stops future collection, though whatever the trial already sent
+stays. Ruling: owner, 2026-09-12. A joined report that lines up a Mac and a
+phone by `mac_id` only fails to find a match for a paid user who declined
+that one-time ask, a Mac whose owner turned the Settings switch off during
+the trial, or a phone that connected before any Mac analytics fired.
 
 `mac_id` is the join key between a Mac and the phones connected to it. It is
 the value the Mac sends as `serverID` in its `welcome` message when a phone
@@ -32,12 +38,17 @@ itself.
 
 | event | sent by | properties | allowed values | when it fires |
 |---|---|---|---|---|
+| `app:launched` | mac | — | — | The app launches. The one event that carries PostHog's own coarse geoip lookup on the request; no property of its own. |
 | `takeover:retry_tapped` | mac | — | — | The main-mix "Speakers unreachable" strip's Try Again button is clicked. |
 | `license:buy_link_opened` | mac | `source` | `mixer_note`, `license_sheet`, `settings`, `gate` | A Buy link is opened, from any of the four places it appears. |
 | `license:removed` | mac | — | — | The user removes their license key from the license sheet. |
-| `license:key_submitted` | mac | `outcome`, `source` (only from the gate) | `outcome`: the verification result (e.g. active, expired, invalid); `source`: `gate` | A pasted or typed license key is submitted, from the settings sheet or the first-run gate. |
+| `license:key_submitted` | mac | `outcome`, `source` (only from the gate) | `outcome`: the verification result — exactly `active`, `revoked`, `unknown`, `invalid`, `unreachable`, `no_server`, `no_key`; `source`: `gate` | A pasted or typed license key is submitted, from the settings sheet or the first-run gate. |
 | `license:enter_sheet_opened` | mac | — | — | The "Enter a license key" sheet opens from Settings. |
 | `license:gate_shown` | mac | — | — | The first-run license gate window is shown. |
+| `license:trial_started` | mac | — | — | The first-run gate's Start Trial button is clicked. |
+| `license:banner_shown` | mac | `day` | `3`, `1` | The days-left-in-trial banner is shown, with how many days remain. |
+| `license:expired_gate_shown` | mac | — | — | The gate is shown because the trial or license has expired. |
+| `license:conversion_consent_opted_in` | mac | — | — | A trial converter accepts the one-time post-purchase usage-statistics ask. Grant-only: there is no matching decline event, since a decline just stops future events. |
 | `license:key_pasted` | mac | `outcome` | `no_key`, `filled` | The Paste button on the license gate is clicked, with whether the clipboard held a usable key. |
 | `license:resend_requested` | mac | — | — | The gate's "Resend" (license email) is requested. |
 | `mixer:bt_pairing_settings_opened` | mac | — | — | "Pair a Bluetooth speaker" opens macOS's own Bluetooth settings pane. |
@@ -59,7 +70,8 @@ itself.
 | `connection:connected` | mac | `kind` | the speaker's connection kind | A non-local speaker successfully connects. |
 | `connection:diagnosis_shown` | mac | `cause` | the failure cause | The connection-failure diagnosis panel is shown for a speaker. |
 | `connection:retry_clicked` | mac | — | — | The diagnosis panel's Retry is clicked. |
-| `scene:created` | mac | `source`, `member_count`, `already_existed` (only from the sheet) | `source`: `sheet` or `mixer`; `member_count`: count of speakers in the new scene; `already_existed`: `true`/`false` | A scene is saved, either from the mixer's "Save as scene" or the dedicated creation sheet. |
+| `streaming:daily_active` | mac | `speaker_count` | count of non-local connected speakers | Once per local calendar day, the first time audio reaches a speaker. |
+| `scene:created` | mac | `source`; `member_count`, `already_existed` (only from the sheet) | `source`: `sheet` or `mixer`; `member_count`: count of speakers in the new scene; `already_existed`: `true`/`false` | A scene is saved, either from the mixer's "Save as scene" (which sends only `source: mixer`) or the dedicated creation sheet (which sends `source: sheet` plus `member_count` and `already_existed`). |
 | `scene:renamed` | mac | — | — | A scene is renamed and saved. |
 | `scene:membership_changed` | mac | `added` | `true`, `false` | A speaker is checked or unchecked in a scene's membership editor. |
 | `scene:deleted` | mac | — | — | A scene is deleted. |
@@ -89,6 +101,7 @@ itself.
 | `remote_invite:settings_link_opened` | mac | — | — | The "Open audiout.app/remote" button under Settings' Allow switch is clicked. |
 | `remote_invite:setup_card_shown` | mac | — | — | The first-run setup card for Audiout Remote is shown. |
 | `remote_invite:setup_link_opened` | mac | — | — | The setup card's "Open audiout.app/remote" button is clicked. |
+| `support:diagnostics_saved` | mac | — | — | The user saves a diagnostics file from Settings. |
 | `intro:card_seen` | phone | `mac_id` (absent before a Mac connects) | — | The phone app's introductory card is shown on first launch. |
 | `intro:find_mac_tapped` | phone | `mac_id` (absent before a Mac connects) | — | The intro card's "Find your Mac" control is tapped. |
 | `connect:connected` | phone | `mac_id` | — | The phone successfully connects to a Mac. |
@@ -98,6 +111,25 @@ itself.
 | `sync:verdict` | phone | `mac_id`, `speaker_kind`, `offset_source`, `settled`, `offset_ms_bucket`, `verdict` | `offset_source`: `measured`, `firstPass`, `fromLastTime`, `byEar`; `settled`: `true`/`false`, the Mac's clock verdict for that speaker at this moment; `offset_ms_bucket`: `0-9`, `10-39`, `40-99`, `100+` (absolute value, in milliseconds); `verdict`: `applied`, `firstPass`, `refused` | A probe run finishes and the phone shows its result. |
 | `sync:recheck_accepted` | phone | `mac_id`, `speaker_kind` | see above | The phone's offer to re-check a first-pass measurement (once the Mac reports the speaker settled) is accepted. |
 | `sync:by_ear_nudged` | phone | `mac_id`, `speaker_kind` | see above | The user moves the by-ear slider one step in the sync sheet. One event per nudge, so a run's count says how much fiddling it took. Owner ruling 2026-09-10; the earlier reading (once per run that could not get a confident answer) is retired. |
+
+## Licence server events
+
+The licence server (`aa-hh/audiout-license-server`) also sends events, always
+gated `sent by: server` below. Its distinct id is the Mac's `install_id` —
+the same value that is the Mac's own PostHog anonymous id — except for
+`build_downloaded`, which has no install to name and uses a random throwaway
+id instead, and a `license_purchased` bought with no prior trial, which is
+named by the Paddle transaction id instead of an install.
+
+| event | sent by | properties | allowed values | when it fires |
+|---|---|---|---|---|
+| `trial_started` | server | `outcome`, `offline_start` | `outcome`: `issued`; `offline_start`: `true`/`false`, whether the trial's start date predates this request (the Mac started it offline, days earlier) | A new trial key is issued. |
+| `trial_resumed` | server | — | — | A device asks for a trial it already has, and gets the same key back. |
+| `trial_refused` | server | `state` | `live`, `expired`, `converted` | A device asks for a trial and is refused because it already has one in that state. |
+| `trial_expired` | server | `converted` | `false` | The daily cron marks a trial expired without it having converted. |
+| `trial_converted` | server | `days_into_trial`, `after_expiry` | `days_into_trial`: whole days from trial start to purchase; `after_expiry`: `true`/`false`, whether the trial had already expired at purchase | A trial key's purchase webhook lands and the trial is marked converted. |
+| `license_purchased` | server | `from_trial`, `source` | `from_trial`: `true`/`false`; `source`: where the purchase came from | A purchase webhook issues a paid key, once per sale. |
+| `build_downloaded` | server | `major` | the downloaded build's major version | A build is downloaded. |
 
 ## Diagnostic logs
 
