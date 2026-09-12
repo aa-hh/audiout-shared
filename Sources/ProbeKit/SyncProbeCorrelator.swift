@@ -235,9 +235,26 @@ public struct SyncProbeCorrelator {
               corr.count >= searchCount
         else { return nil }
 
-        var peakIndex = 0
+        return arrival(inCorrelation: corr, searchCount: searchCount, lags: 0..<searchCount)
+    }
+
+    /// The best lag inside `lags`, scored against the robust background of the
+    /// WHOLE correlation.
+    ///
+    /// Factored out of ``arrival(of:in:ambientNoise:)`` so the passive drift
+    /// path can ask the same question of a narrow lag window without a second
+    /// copy of the peak-and-background math. The background stays whole-tape
+    /// deliberately: a window a few hundred lags wide has no honest background
+    /// of its own, and scoring a peak against its own immediate neighbourhood
+    /// is how a matched filter flatters itself.
+    func arrival(inCorrelation corr: [Float], searchCount: Int, lags: Range<Int>) -> Arrival? {
+        let lo = max(0, lags.lowerBound)
+        let hi = min(searchCount, lags.upperBound)
+        guard lo < hi, searchCount <= corr.count else { return nil }
+
+        var peakIndex = lo
         var peakValue = -Float.infinity
-        for i in 0..<searchCount where corr[i] > peakValue {
+        for i in lo..<hi where corr[i] > peakValue {
             peakValue = corr[i]
             peakIndex = i
         }
