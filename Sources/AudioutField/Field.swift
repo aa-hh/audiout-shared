@@ -97,7 +97,7 @@ public enum AudioutField {
     /// Contents/Resources — so check there first. `Bundle.module` stays as the
     /// fallback for dev builds, tests, and iOS, where bundles do land at the
     /// .app root.
-    private static let bundle: Bundle = {
+    static let bundle: Bundle = {
         if let url = Bundle.main.resourceURL?
             .appendingPathComponent("AudioutShared_AudioutField.bundle"),
            let shipped = Bundle(url: url) {
