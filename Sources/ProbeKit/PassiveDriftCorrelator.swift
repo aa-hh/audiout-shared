@@ -134,6 +134,20 @@ public struct PassiveDriftCorrelator: Sendable {
     /// Lags below this are the reference's own main lobe, not a repeat.
     public var periodicityMinLagSeconds: Double = 0.010
 
+    /// Lower edge of the band the suitability checks and the matched filter
+    /// judge, Hz. A pop mix's power is mostly bass, and a bass note repeats
+    /// every 5–25 ms, so the full-band slice looks periodic even when its
+    /// transients carry plenty of timing; small Bluetooth speakers barely
+    /// reproduce that bass anyway. 300 Hz rather than the chirp probe's 500:
+    /// at 500 the synthetic broadband scene in `PassiveDriftCorrelatorTests`
+    /// loses enough low-mid content that its quieter speaker scores 2.9, under
+    /// ``minPeakToSidelobe``; at 300 it scores 3.1 and the bass-heavy scene 4.3.
+    public var timingBandLowHz: Double = 300
+
+    /// Upper edge of that band, Hz. Ignored when at or above the capture's
+    /// Nyquist frequency (half its sample rate).
+    public var timingBandHighHz: Double = 8_000
+
     /// Two candidates closer together than this are the same arrival found by
     /// two overlapping search windows; the weaker is dropped.
     public var peakSeparationSeconds: Double = 0.005
@@ -160,18 +174,52 @@ public struct PassiveDriftCorrelator: Sendable {
                         capture: [Float], captureRate: Double,
                         expectedDelaysMs: [Double], searchHalfWidthMs: Double,
                         ambientNoise: [Float]? = nil) -> DriftOutcome {
+        analyzeWithCandidates(reference: reference, referenceRate: referenceRate,
+                              capture: capture, captureRate: captureRate,
+                              expectedDelaysMs: expectedDelaysMs,
+                              searchHalfWidthMs: searchHalfWidthMs,
+                              ambientNoise: ambientNoise).outcome
+    }
+
+    /// ``analyze(reference:referenceRate:capture:captureRate:expectedDelaysMs:searchHalfWidthMs:ambientNoise:)``
+    /// plus, for diagnostics, the strongest correlation peak inside each
+    /// expected delay's search window whatever its confidence — so a
+    /// `.noConvincingPeak` window says whether the true arrival scored just
+    /// under ``minPeakToSidelobe`` or was never in the window.
+    ///
+    /// `candidates` follows `expectedDelaysMs` order, from the correlation
+    /// that decided `outcome` (noise-weighted when that found a peak, plain
+    /// otherwise). A window with no positive correlation or no room inside the
+    /// capture contributes nothing. Empty when the slice was refused before
+    /// correlating (quiet, narrowband, periodic, too short).
+    public func analyzeWithCandidates(reference: [Float], referenceRate: Double,
+                                      capture: [Float], captureRate: Double,
+                                      expectedDelaysMs: [Double], searchHalfWidthMs: Double,
+                                      ambientNoise: [Float]? = nil)
+        -> (outcome: DriftOutcome, candidates: [DriftPeak]) {
         guard referenceRate > 0, captureRate > 0,
               reference.count > 1, capture.count > 1
-        else { return .unusable(.slicesTooShort) }
+        else { return (.unusable(.slicesTooShort), []) }
 
-        if let rejection = suitability(of: reference, rate: referenceRate) {
-            return .unusable(rejection)
-        }
+        // Level is judged full-band: −50 dBFS is a statement about the program
+        // being there at all; whether its in-band part can carry timing is the
+        // bandwidth and periodicity checks' call.
+        guard Self.rms(reference) >= minReferenceRMS else { return (.unusable(.referenceTooQuiet), []) }
 
-        let probe = Self.resampled(reference, from: referenceRate, to: captureRate)
+        // One identical filter on every signal the matched filter sees. Its
+        // phase response shifts reference and capture alike, so it cancels out
+        // of the correlation lag (the cross-correlation of two equally
+        // filtered signals is the original one smoothed by a zero-phase kernel).
+        let probe = bandLimited(Self.resampled(reference, from: referenceRate, to: captureRate),
+                                rate: captureRate)
         guard probe.count > 1, capture.count >= probe.count else {
-            return .unusable(.slicesTooShort)
+            return (.unusable(.slicesTooShort), [])
         }
+        if let rejection = suitability(of: probe, rate: captureRate) {
+            return (.unusable(rejection), [])
+        }
+        let capture = bandLimited(capture, rate: captureRate)
+        let ambientNoise = ambientNoise.map { bandLimited($0, rate: captureRate) }
         let searchCount = capture.count - probe.count + 1
 
         var correlator = SyncProbeCorrelator(sampleRate: captureRate)
@@ -188,22 +236,32 @@ public struct PassiveDriftCorrelator: Sendable {
         // optimization for stationary noise, and its failure is never the
         // run's.
         var found: [DriftPeak] = []
+        var deciding: [Float] = []
         if let ambientNoise, !ambientNoise.isEmpty,
            let corr = SyncProbeCorrelator.correlate(recording: capture, probe: probe,
                                                     ambientNoise: ambientNoise),
            corr.count >= searchCount {
             found = peaks(in: corr, searchCount: searchCount, windows: windows,
                           correlator: correlator, rate: captureRate)
+            if !found.isEmpty { deciding = corr }
         }
         if found.isEmpty {
             guard let corr = SyncProbeCorrelator.correlate(recording: capture, probe: probe,
                                                            ambientNoise: nil),
                   corr.count >= searchCount
-            else { return .unusable(.noConvincingPeak) }
+            else { return (.unusable(.noConvincingPeak), []) }
             found = peaks(in: corr, searchCount: searchCount, windows: windows,
                           correlator: correlator, rate: captureRate)
+            deciding = corr
         }
-        return found.isEmpty ? .unusable(.noConvincingPeak) : .usable(found)
+
+        var unthresholded = correlator
+        unthresholded.minPeakToSidelobe = 0
+        let candidates = windows.compactMap { window -> DriftPeak? in
+            unthresholded.arrival(inCorrelation: deciding, searchCount: searchCount, lags: window)
+                .map { DriftPeak(delayMs: $0.sampleOffset / captureRate * 1000, confidence: $0.peakToSidelobe) }
+        }
+        return (found.isEmpty ? .unusable(.noConvincingPeak) : .usable(found), candidates)
     }
 
     // MARK: - internals
@@ -226,13 +284,8 @@ public struct PassiveDriftCorrelator: Sendable {
                                     confidence: $0.peakToSidelobe) }
     }
 
-    /// Nil when the slice can carry a timing measurement.
+    /// Nil when the band-limited slice can carry a timing measurement.
     private func suitability(of reference: [Float], rate: Double) -> DriftRejection? {
-        var sumSquares = 0.0
-        for sample in reference { sumSquares += Double(sample) * Double(sample) }
-        let rms = (sumSquares / Double(reference.count)).squareRoot()
-        guard rms >= minReferenceRMS else { return .referenceTooQuiet }
-
         guard let selfCorr = SyncProbeCorrelator.correlate(recording: reference, probe: reference,
                                                            ambientNoise: nil),
               !selfCorr.isEmpty, selfCorr[0] > 0
@@ -287,6 +340,40 @@ public struct PassiveDriftCorrelator: Sendable {
         let mean = weighted / total
         let variance = max(0, weightedSquares / total - mean * mean)
         return variance.squareRoot()
+    }
+
+    private static func rms(_ samples: [Float]) -> Double {
+        var sumSquares = 0.0
+        for sample in samples { sumSquares += Double(sample) * Double(sample) }
+        return (sumSquares / Double(samples.count)).squareRoot()
+    }
+
+    /// ``timingBandLowHz``–``timingBandHighHz`` as a 2nd-order Butterworth
+    /// high-pass then low-pass (audio-EQ-cookbook biquads, Q = 1/√2). An edge
+    /// at or above Nyquist, or at or below 0, is left out.
+    func bandLimited(_ samples: [Float], rate: Double) -> [Float] {
+        func section(hz: Double, highPass: Bool) -> [Double] {
+            let w0 = 2 * Double.pi * hz / rate
+            let cosW = cos(w0), alpha = sin(w0) / 2.squareRoot()
+            let a0 = 1 + alpha
+            let b = highPass ? [(1 + cosW) / 2, -(1 + cosW), (1 + cosW) / 2]
+                             : [(1 - cosW) / 2, 1 - cosW, (1 - cosW) / 2]
+            // vDSP's order: b0, b1, b2, a1, a2, with a0 normalised to 1.
+            return b.map { $0 / a0 } + [-2 * cosW / a0, (1 - alpha) / a0]
+        }
+        var coefficients: [Double] = []
+        if timingBandLowHz > 0, timingBandLowHz < rate / 2 {
+            coefficients += section(hz: timingBandLowHz, highPass: true)
+        }
+        if timingBandHighHz > 0, timingBandHighHz < rate / 2 {
+            coefficients += section(hz: timingBandHighHz, highPass: false)
+        }
+        guard !coefficients.isEmpty,
+              var filter = vDSP.Biquad(coefficients: coefficients, channelCount: 1,
+                                       sectionCount: vDSP_Length(coefficients.count / 5),
+                                       ofType: Float.self)
+        else { return samples }
+        return filter.apply(input: samples)
     }
 
     /// Linear interpolation onto the capture's rate; identity when the rates

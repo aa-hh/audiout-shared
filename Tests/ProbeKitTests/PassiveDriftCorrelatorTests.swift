@@ -86,12 +86,13 @@ import Testing
     /// fractional delays, plus mic noise at `snrDB`.
     private static func capture(seconds: Double, rate: Double,
                                 arrivals: [(delayMs: Double, gain: Double)],
-                                snrDB: Double, seed: UInt64 = 7) -> [Float] {
+                                snrDB: Double, seed: UInt64 = 7,
+                                program: (inout [Double], Double, Double, Double) -> Void
+                                    = { addProgram(to: &$0, rate: $1, delaySeconds: $2, gain: $3) }) -> [Float] {
         let count = Int(seconds * rate)
         var clean = [Double](repeating: 0, count: count)
         for arrival in arrivals {
-            addProgram(to: &clean, rate: rate,
-                       delaySeconds: arrival.delayMs / 1000, gain: arrival.gain)
+            program(&clean, rate, arrival.delayMs / 1000, arrival.gain)
         }
         let signalRMS = (clean.reduce(0) { $0 + $1 * $1 } / Double(count)).squareRoot()
         let noiseRMS = signalRMS / pow(10, snrDB / 20)
@@ -102,6 +103,102 @@ import Testing
             for _ in 0..<4 { u += Double.random(in: -1...1, using: &rng) }
             return Float(clean[i] + noiseRMS * u * 0.866)
         }
+    }
+
+    /// Pop-mix-like program whose power sits mostly in the bass, the way a
+    /// real vocal pop mix does: a bass line (50–120 Hz plus a second
+    /// harmonic) changing note every 0.5 s, a held three-note chord in the
+    /// low mids, and plucked transients — sixteen inharmonic partials across
+    /// 700 Hz–7.7 kHz decaying over ~40 ms — on an irregular seeded rhythm.
+    ///
+    /// Everything is a closed-form function of time, so a fractional delay is
+    /// exact by construction, for the same reason as ``lines``.
+    private static let bassNotesHz: [Double] = [55, 82.4, 73.4, 98, 61.7, 110, 65.4, 87.3]
+    private static let chordsHz: [[Double]] = [[220, 277.2, 329.6], [246.9, 311.1, 370],
+                                               [196, 246.9, 293.7], [261.6, 329.6, 392]]
+    private static let onsets: [Double] = {
+        var rng = SeededRNG(seed: 11)
+        var times: [Double] = []
+        var t = -1.0
+        while t < 4 { times.append(t); t += Double.random(in: 0.09...0.33, using: &rng) }
+        return times
+    }()
+    private static let noteSeconds = 0.5
+
+    private static func addPopMix(to buffer: inout [Double], rate: Double,
+                                  delaySeconds: Double, gain: Double,
+                                  bass: Bool = true, rest: Bool = true) {
+        for i in 0..<buffer.count {
+            let t = Double(i) / rate - delaySeconds
+            let note = Int((t / noteSeconds).rounded(.down))
+            let into = t - Double(note) * noteSeconds
+            let envelope = max(0, min(1, into / 0.01, (noteSeconds - into) / 0.01))
+            var sample = 0.0
+            if bass {
+                let hz = bassNotesHz[((note % bassNotesHz.count) + bassNotesHz.count) % bassNotesHz.count]
+                sample += 0.3 * sin(2 * .pi * hz * t) + 0.09 * sin(4 * .pi * hz * t)
+            }
+            if rest {
+                for hz in chordsHz[((note % chordsHz.count) + chordsHz.count) % chordsHz.count] {
+                    sample += 0.08 * sin(2 * .pi * hz * t)
+                }
+            }
+            buffer[i] += gain * envelope * sample
+        }
+        guard rest else { return }
+        let ring = 0.2
+        for (n, onset) in onsets.enumerated() {
+            let first = max(0, Int(((onset + delaySeconds) * rate).rounded(.up)))
+            let last = min(buffer.count, Int(((onset + ring + delaySeconds) * rate).rounded(.down)))
+            guard first < last else { continue }
+            for i in first..<last {
+                let age = Double(i) / rate - delaySeconds - onset
+                let decay = exp(-age / 0.04)
+                var sample = 0.0
+                for k in 0..<16 {
+                    let hz = 700 * pow(11, Double(k) / 15) + 23.1 * sin(Double(k * 7 + n))
+                    sample += 0.1 * sin(2 * .pi * hz * age + Double(n * 3 + k))
+                }
+                buffer[i] += gain * decay * sample
+            }
+        }
+    }
+
+    private static func power(_ x: [Double]) -> Double { x.reduce(0) { $0 + $1 * $1 } / Double(x.count) }
+
+    /// Real vocal pop through two speakers was refused as `referenceTooPeriodic`
+    /// in every window (live, 2026-09-13): a bass note repeats every 5–25 ms,
+    /// so the energy-weighted self-correlation sits near ±1 at one bass period.
+    /// Red if the suitability checks and the matched filter judge the full-band
+    /// signal instead of the band the timing lives in — remove the band-limit
+    /// in `PassiveDriftCorrelator.analyze` and this fails that way again.
+    @Test func recoversDelaysThroughBassHeavyMusic() {
+        let rate = Self.rate
+        var reference = [Double](repeating: 0, count: Int(1.0 * rate))
+        Self.addPopMix(to: &reference, rate: rate, delaySeconds: 0, gain: 1)
+        var bassOnly = [Double](repeating: 0, count: reference.count)
+        Self.addPopMix(to: &bassOnly, rate: rate, delaySeconds: 0, gain: 1, rest: false)
+        let bassShare = Self.power(bassOnly) / Self.power(reference)
+        #expect(bassShare > 0.6, "fixture must be bass-dominated, got \(bassShare)")
+
+        let tape = Self.capture(seconds: 2.0, rate: rate,
+                                arrivals: [(37.4, 0.5), (205.9, 0.35)], snrDB: 15,
+                                program: { Self.addPopMix(to: &$0, rate: $1, delaySeconds: $2, gain: $3) })
+
+        let outcome = PassiveDriftCorrelator().analyze(
+            reference: reference.map(Float.init), referenceRate: rate,
+            capture: tape, captureRate: rate,
+            expectedDelaysMs: [40, 200], searchHalfWidthMs: 120)
+
+        guard case .usable(let peaks) = outcome else {
+            Issue.record("expected two arrivals, got \(outcome)")
+            return
+        }
+        #expect(peaks.count == 2)
+        let delays = peaks.map(\.delayMs).sorted()
+        #expect(abs(delays[0] - 37.4) < 1)
+        #expect(abs(delays[1] - 205.9) < 1)
+        #expect(peaks.allSatisfy { $0.confidence >= 3 })
     }
 
     /// Two speakers playing one program, both delays recovered within ±1 ms.
@@ -127,6 +224,30 @@ import Testing
         #expect(abs(delays[0] - 37.4) < 1)
         #expect(abs(delays[1] - 205.9) < 1)
         #expect(peaks.allSatisfy { $0.confidence >= 3 })
+    }
+
+    /// A window refused as `.noConvincingPeak` still names its best candidate,
+    /// so a live refusal tells "scored just under the threshold" apart from
+    /// "arrival outside the window". Red if candidates come from the thresholded
+    /// search (then empty here), or are dropped whenever the outcome is unusable.
+    @Test func refusedWindowStillReportsItsBestCandidate() {
+        let rate = Self.rate
+        let reference = Self.programSlice(seconds: 1.0, rate: rate)
+        let tape = Self.capture(seconds: 2.0, rate: rate, arrivals: [(118.2, 0.5)], snrDB: 15)
+        var correlator = PassiveDriftCorrelator()
+        correlator.minPeakToSidelobe = 50  // well above what this scene's true arrival scores
+
+        let result = correlator.analyzeWithCandidates(
+            reference: reference, referenceRate: rate,
+            capture: tape, captureRate: rate,
+            expectedDelaysMs: [120], searchHalfWidthMs: 120)
+
+        #expect(result.outcome == .unusable(.noConvincingPeak))
+        #expect(result.candidates.count == 1)
+        if let candidate = result.candidates.first {
+            #expect(abs(candidate.delayMs - 118.2) < 1)
+            #expect(candidate.confidence < 50)
+        }
     }
 
     /// The Mac retains at 44.1 kHz and a microphone commonly captures at
