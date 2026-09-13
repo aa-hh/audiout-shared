@@ -28,6 +28,17 @@
     "gain": 0.65,
     "paperLift": 1.94
   },
+  "settled": {
+    "timeScale": 2.5,
+    "orbit": 0.03,
+    "rollAmp": 1.3,
+    "rollRate": 0.14,
+    "taper": 0.56,
+    "curlAmp": 0.15,
+    "curlRate": 1.55,
+    "breatheFloor": 0.82,
+    "breatheDepth": 0.28
+  },
   "ramps": {
     "Movie night": { "lo": [0.039, 0.431, 0.247], "mid": [0.169, 1.0, 0.561], "peak": [0.859, 1.0, 0.933] },
     "Chill out":   { "lo": [0.243, 0.184, 0.086], "mid": [0.91, 0.722, 0.294], "peak": [1.0, 0.851, 0.478] },

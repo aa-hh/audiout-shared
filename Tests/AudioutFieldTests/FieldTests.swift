@@ -16,6 +16,14 @@ import Testing
         #expect(AudioutField.defaults.emitters.count == 3)
     }
 
+    @Test func settledDecodesWithKnownSentinels() {
+        #expect(AudioutField.settled.timeScale == 2.5)
+        #expect(AudioutField.settled.rollAmp == 1.3)
+        #expect(AudioutField.settled.curlRate == 1.55)
+        #expect(AudioutField.settled.taper == 0.56)
+        #expect(AudioutField.settled.breatheFloor == 0.82)
+    }
+
     @Test func ramps() {
         #expect(AudioutField.ramps.count == 3)
         #expect(AudioutField.ramps["Movie night"]?.mid == [0.169, 1.0, 0.561])

@@ -34,6 +34,38 @@ public struct FieldDefaults: Decodable, Sendable {
     public let paperLift: Double
 }
 
+/// The field's second state: fully emitted, nothing travels outward. Each
+/// ring rolls over itself in place (a curl phase runs radially through every
+/// crest) while an oval compression lobe slowly orbits the source. Everything
+/// not listed here comes from `defaults` unchanged — except `speedBase` /
+/// `speedStep`, which this state retires (there is no outward phase term),
+/// and the three keys below that deliberately override their `defaults`
+/// counterparts. Formula and rulings: `dev/notes/settled-emitter-state.md`
+/// in the Mac repo (chosen 2026-09-13).
+public struct FieldSettled: Decodable, Sendable {
+    /// Multiply the port's time input by this once; every rate here and every
+    /// hard-coded rate literal (orbit drift, breathing) then matches the look
+    /// as tuned. Do NOT also fold it into individual rates.
+    public let timeScale: Double
+    /// Overrides `defaults.orbit` (0.1): settled means "moves slightly".
+    public let orbit: Double
+    /// Strength of the orbiting compression lobe (phase radians).
+    public let rollAmp: Double
+    /// How fast the lobe circles the source.
+    public let rollRate: Double
+    /// Radius inside which lobe and curl fade to zero, so the innermost ring
+    /// cannot fold into itself. Load-bearing — do not remove.
+    public let taper: Double
+    /// How far each crest leans as it rolls over itself.
+    public let curlAmp: Double
+    /// How fast the crest churns over itself.
+    public let curlRate: Double
+    /// Overrides `defaults.breatheFloor` (0.4): brightness must hold steady.
+    public let breatheFloor: Double
+    /// Overrides `defaults.breatheDepth` (0.6): same ruling.
+    public let breatheDepth: Double
+}
+
 /// One scene's colour ramp: low, mid, and peak-intensity stops, each an RGB
 /// triple in 0...1.
 public struct FieldRamp: Decodable, Sendable {
@@ -45,6 +77,7 @@ public struct FieldRamp: Decodable, Sendable {
 private struct FieldFile: Decodable {
     let schema: Int
     let defaults: FieldDefaults
+    let settled: FieldSettled
     let ramps: [String: FieldRamp]
 }
 
@@ -53,6 +86,7 @@ private struct FieldFile: Decodable {
 /// the Mac app). A port reads these numbers; it never retypes them.
 public enum AudioutField {
     public static let defaults: FieldDefaults = file.defaults
+    public static let settled: FieldSettled = file.settled
     public static let ramps: [String: FieldRamp] = file.ramps
 
     /// SwiftPM's generated `Bundle.module` accessor checks exactly two places:
