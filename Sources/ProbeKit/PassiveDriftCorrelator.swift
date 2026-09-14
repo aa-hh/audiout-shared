@@ -193,15 +193,21 @@ public struct PassiveDriftCorrelator: Sendable {
     /// A sound leaving a speaker arrives at one time, and every band that can
     /// hear it puts it there. A musical repeat does not: a bass line that
     /// comes round every 10 ms makes a false peak in the bottom band and
-    /// nothing at all in the top one. Three of four leaves room for the one
-    /// band the program happens to be quiet in, and still refuses a lag that
-    /// only the band carrying the repeat believes.
+    /// nothing at all in the top one. Two of four still refuses a lag only
+    /// the band carrying the repeat believes, and leaves room for the two
+    /// bands a quiet passage can leave with nothing to hear.
+    ///
+    /// Two rather than three is the owner's ruling of 2026-09-14. Three
+    /// refused the 21:16:33 window in `PassiveDriftFixtureTests`, a real
+    /// arrival at 570.6 ms that cleared both other gates and that only the
+    /// bottom and top bands voted for, the capture being the quietest in the
+    /// set at -48 dBFS.
     ///
     /// The four bands are geometric across ``timingBandLowHz`` to
     /// ``timingBandHighHz``, and the music below 300 Hz is not among them —
     /// that is where the mic hears best and where the repeats live, so it
     /// gets no vote at all.
-    public var minAgreeingBands: Int = 3
+    public var minAgreeingBands: Int = 2
 
     /// How far a band's own best lag may sit from the full-band lag and still
     /// count as agreeing, ms.

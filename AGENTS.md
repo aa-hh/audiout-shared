@@ -140,12 +140,15 @@ dumped windows — the mix the Mac sent and what its microphone heard, in
 `Tests/ProbeKitTests/Fixtures` — through `PassiveDriftCorrelator` and prints
 what today's code scores on each. Twelve windows, from two live recordings:
 
-- The four from 2026-09-13 hold nothing the estimator can stand behind, and
-  that refusal is the finding — a test that failed on it would have to be
-  deleted before the algorithm could be worked on at all. Two are asserted:
-  21:13:33, the one the app accepted live at 574.3 ms and corrected a speaker
-  on, stays refused, and with the gates and the band vote switched off it comes
-  back, so the test says which code does the refusing.
+- Three of the four from 2026-09-13 hold nothing the estimator can stand
+  behind, and that refusal is the finding — a test that failed on it would have
+  to be deleted before the algorithm could be worked on at all. Two windows are
+  asserted. 21:13:33, the one the app accepted live at 574.3 ms and corrected a
+  speaker on, stays refused, and with the gates and the band vote switched off
+  it comes back, so the test says which code does the refusing. 21:16:33 is the
+  other way round: the quietest capture in the set at −48 dBFS, accepted at
+  570.6 ms on the two bands that can hear it, which is what the owner's
+  2026-09-14 ruling of 2 agreeing bands out of 4 was for.
 - The eight from 2026-09-14 are the labelled recording, music at a normal
   level with the sender's dropped-cycle fault fixed. Three of them were
   recorded with exactly +40 ms of trim added to one speaker: their two arrivals
@@ -159,11 +162,12 @@ how the tracked ones were labelled.
 
 The Mac repo's `dev/drift-window-analysis.py` reads the same fixtures
 (`--fixtures <dir> --swift <this suite's output>`) and checks its own answer
-against the Swift one. Its replica of this package's correlator predates the
-whitening, so until that script divides the cross-spectrum by the reference's
-magnitude to the 0.7 as `PassiveDriftCorrelator` does, its parity mode compares
-two different signals and reports 9–51% disagreement on windows that in fact
-agree to 0.03%.
+against the Swift one. Its replica of this package's correlator whitens the
+cross-spectrum by the reference's magnitude at the same 0.7 exponent
+(`SWIFT_WHITENING` there, ``whiteningExponent`` here), so its parity mode
+compares the same signal this suite does. If that exponent or the band edges
+move here, they have to move there too or the comparison silently stops being
+one.
 
 Note this repo has none of the Mac repo's hooks, so nothing stops a bare
 `swift` command here and nothing runs these tests for you on commit.
