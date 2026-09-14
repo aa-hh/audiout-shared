@@ -132,14 +132,14 @@ import Testing
     /// vote off, 2.3 accepts that window again — the defect — and with them on
     /// it is refused.
     ///
-    /// The 21:16:33 window is refused now too, where ticket 10 accepted it at
-    /// 570.6 ms. Its two gates still pass (margin 1.46, local 3.06) and the
-    /// band vote is what stops it: the 300–682 Hz and 3520–8000 Hz bands put
-    /// the arrival at 570.6 and 571.2, the two middle bands at 585.3 and
-    /// 593.7. That capture is the quietest in the set at −48 dBFS, and 3 of 4
-    /// is the rule the ticket asked for; at 2 of 4 the window comes back and
-    /// every other refusal here still holds. The choice is the owner's, so the
-    /// numbers are written down rather than the threshold quietly moved.
+    /// The 21:16:33 window is the one the vote must not refuse. Its two gates
+    /// pass (margin 1.46, local 3.06) and two bands carry it: the 300–682 Hz
+    /// and 3520–8000 Hz bands put the arrival at 570.6 and 571.2, the two
+    /// middle bands at 585.3 and 593.7. That capture is the quietest in the
+    /// set at −48 dBFS, which is why two of its four bands hear nothing to
+    /// vote with. Ticket 10 asked for 3 of 4, which refused it; the owner
+    /// ruled 2 of 4 on 2026-09-14 and it comes back, while every other
+    /// refusal here still holds.
     @Test func gatesAndBandVoteRefuseWhatTheScoreAloneAccepted() throws {
         var correlator = PassiveDriftCorrelator()
         correlator.minPeakToSidelobe = 2.3
@@ -160,11 +160,24 @@ import Testing
             }
 
             let (outcome, candidates) = analyze(correlator)
+            let votes = candidates.map { "\($0.agreeingBands)" }.joined(separator: ",")
+
+            if fixture.name == "2026-09-13T21-16-33Z-good" {
+                var accepted: [Double] = []
+                if case .usable(let peaks) = outcome { accepted = peaks.map(\.delayMs) }
+                #expect(accepted.count == 1,
+                        "two of four should accept this window: \(accepted)")
+                #expect(accepted.contains { abs($0 - 570.6) <= 1 },
+                        "the accepted arrival is the 570.6 ms one: \(accepted)")
+                #expect(candidates.first?.agreeingBands == 2,
+                        "\(fixture.name) rests on exactly two bands: \(votes)")
+                continue
+            }
+
             #expect(outcome == .unusable(.noConvincingPeak),
                     "\(fixture.name) holds no arrival the estimator can stand behind")
-            let votes = candidates.map { "\($0.agreeingBands)" }.joined(separator: ",")
-            #expect(candidates.allSatisfy { $0.agreeingBands < 3 },
-                    "\(fixture.name) should have no lag three bands agree on: \(votes)")
+            #expect(candidates.allSatisfy { $0.agreeingBands < 2 },
+                    "\(fixture.name) should have no lag two bands agree on: \(votes)")
 
             if fixture.name == "2026-09-13T21-13-33Z-good" {
                 #expect(analyze(ungated).0 != .unusable(.noConvincingPeak),
