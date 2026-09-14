@@ -113,57 +113,128 @@ import Testing
             // Mac repo is compared against: `drift-window-analysis.py
             // --fixtures <dir> --swift <this output>`.
             for (expected, candidate) in zip(fixture.expectedDelaysMs, result.candidates) {
-                print(String(format: "CANDIDATE %@ expected=%.2f lag=%.2f score=%.4f local=%.4f margin=%.4f",
+                print(String(format: "CANDIDATE %@ expected=%.2f lag=%.2f score=%.4f local=%.4f margin=%.4f bands=%d spread=%.2f",
                              fixture.name, expected, candidate.delayMs, candidate.confidence,
-                             candidate.localConfidence, candidate.margin))
+                             candidate.localConfidence, candidate.margin,
+                             candidate.agreeingBands, candidate.bandSpreadMs))
             }
         }
     }
 
-    /// The two gates, at the score threshold the Mac app ran live.
+    /// The gates and the band vote, at the score threshold the Mac app ran
+    /// live.
     ///
     /// Live test 3 (2026-09-13) accepted the 21:13:33 window at 574.3 ms with
     /// a whole-tape score of 2.40 and corrected a speaker that had not moved.
-    /// Its peak stands 2% clear of the next lag in the same window, which is
-    /// what the gates read; the whole-tape score cannot see that at all. So
-    /// this fixes both halves: with the gates off, 2.3 accepts that window
-    /// again — the defect — and with them on it is refused while the window
-    /// that holds a real arrival still passes.
-    @Test func gatesRefuseWhatTheScoreAloneAccepted() throws {
+    /// Its peak stands 2% clear of the next lag in the same window and one
+    /// sub-band out of four puts the arrival there; neither is visible to the
+    /// whole-tape score. So this fixes both halves: with the gates and the
+    /// vote off, 2.3 accepts that window again — the defect — and with them on
+    /// it is refused.
+    ///
+    /// The 21:16:33 window is refused now too, where ticket 10 accepted it at
+    /// 570.6 ms. Its two gates still pass (margin 1.46, local 3.06) and the
+    /// band vote is what stops it: the 300–682 Hz and 3520–8000 Hz bands put
+    /// the arrival at 570.6 and 571.2, the two middle bands at 585.3 and
+    /// 593.7. That capture is the quietest in the set at −48 dBFS, and 3 of 4
+    /// is the rule the ticket asked for; at 2 of 4 the window comes back and
+    /// every other refusal here still holds. The choice is the owner's, so the
+    /// numbers are written down rather than the threshold quietly moved.
+    @Test func gatesAndBandVoteRefuseWhatTheScoreAloneAccepted() throws {
         var correlator = PassiveDriftCorrelator()
         correlator.minPeakToSidelobe = 2.3
 
         var ungated = correlator
         ungated.minPeakMargin = 0
         ungated.minLocalScore = 0
+        ungated.minAgreeingBands = 0
 
-        for fixture in try Self.manifest() {
+        for fixture in try Self.manifest() where fixture.name.hasPrefix("2026-09-13") {
             let reference = try fixture.reference(in: Self.directory)
             let capture = try fixture.capture(in: Self.directory)
-            func analyze(_ correlator: PassiveDriftCorrelator) -> DriftOutcome {
-                correlator.analyze(reference: reference, referenceRate: fixture.referenceRate,
-                                   capture: capture, captureRate: fixture.captureRate,
-                                   expectedDelaysMs: fixture.expectedDelaysMs,
-                                   searchHalfWidthMs: 120)
+            func analyze(_ correlator: PassiveDriftCorrelator) -> (DriftOutcome, [DriftPeak]) {
+                correlator.analyzeWithCandidates(
+                    reference: reference, referenceRate: fixture.referenceRate,
+                    capture: capture, captureRate: fixture.captureRate,
+                    expectedDelaysMs: fixture.expectedDelaysMs, searchHalfWidthMs: 120)
             }
 
-            switch fixture.name {
-            case "2026-09-13T21-16-33Z-good":
-                guard case .usable(let peaks) = analyze(correlator) else {
-                    Issue.record("the window with a real arrival is refused: \(analyze(correlator))")
-                    continue
-                }
-                #expect(abs(peaks[0].delayMs - 570.6) < 1,
-                        "the accepted arrival moved: \(peaks[0].delayMs) ms")
-            case "2026-09-13T21-13-33Z-good":
-                #expect(analyze(correlator) == .unusable(.noConvincingPeak),
-                        "the window that caused a wrong correction is accepted again")
-                #expect(analyze(ungated) != .unusable(.noConvincingPeak),
-                        "the gates have stopped being what refuses it")
-            default:
-                #expect(analyze(correlator) == .unusable(.noConvincingPeak),
-                        "\(fixture.name) (\(fixture.label)) should have nothing to find")
+            let (outcome, candidates) = analyze(correlator)
+            #expect(outcome == .unusable(.noConvincingPeak),
+                    "\(fixture.name) holds no arrival the estimator can stand behind")
+            let votes = candidates.map { "\($0.agreeingBands)" }.joined(separator: ",")
+            #expect(candidates.allSatisfy { $0.agreeingBands < 3 },
+                    "\(fixture.name) should have no lag three bands agree on: \(votes)")
+
+            if fixture.name == "2026-09-13T21-13-33Z-good" {
+                #expect(analyze(ungated).0 != .unusable(.noConvincingPeak),
+                        "the gates and the vote have stopped being what refuses it")
             }
+        }
+    }
+
+    /// The forced +40 ms trim, read off the windows either side of it.
+    ///
+    /// Both speakers play the same music, so with ±120 ms search windows
+    /// around baselines a few milliseconds apart every window contains both
+    /// arrivals and the plain search hands the same global maximum to both
+    /// baselines. Ticket 09's whitened filter did not change that — it is the
+    /// claim resolution that does: the baseline nearest a shared peak keeps
+    /// it and the other looks again with that lag ruled out, so each speaker
+    /// owns an arrival of its own.
+    ///
+    /// What the +40 ms trim does to these windows is widen the distance
+    /// between the two arrivals by the trim, and that is what this measures.
+    /// It does NOT compare a speaker's arrival between blocks: the tracker was
+    /// running live and corrected both speakers during the good blocks (the
+    /// dumps' own baselines move from 537/529 to 562.8/562.8), and each
+    /// relaunch rolls a fresh Bluetooth link latency, so no arrival is the
+    /// same measurement twice across a block boundary.
+    @Test func theForcedJumpWidensTheGapBetweenTheTwoArrivals() throws {
+        let correlator = PassiveDriftCorrelator()
+        var gaps: [String: Double] = [:]
+        var secondSpeaker: [String: Double] = [:]
+
+        for fixture in try Self.manifest() where fixture.name.hasPrefix("2026-09-14") {
+            let reference = try fixture.reference(in: Self.directory)
+            let capture = try fixture.capture(in: Self.directory)
+            let result = correlator.analyzeWithCandidates(
+                reference: reference, referenceRate: fixture.referenceRate,
+                capture: capture, captureRate: fixture.captureRate,
+                expectedDelaysMs: fixture.expectedDelaysMs, searchHalfWidthMs: 120)
+            let lags = result.candidates.map(\.delayMs)
+            #expect(lags.count == 2, "\(fixture.name) measured \(lags.count) windows, not 2")
+            guard lags.count == 2 else { continue }
+            gaps[fixture.name] = abs(lags[0] - lags[1])
+            secondSpeaker[fixture.name] = lags.min()!
+            let accepted: Int
+            if case .usable(let peaks) = result.outcome { accepted = peaks.count } else { accepted = 0 }
+            print(String(format: "JUMP %@ lags %.2f / %.2f  gap %.2f  accepted %d",
+                         fixture.name, lags[0], lags[1], abs(lags[0] - lags[1]), accepted))
+        }
+
+        let good = ["2026-09-14T08-45-08Z-good", "2026-09-14T08-51-08Z-good",
+                    "2026-09-14T09-36-08Z-good"].compactMap { gaps[$0] }
+        let jumped = ["2026-09-14T09-45-55Z-jump+40", "2026-09-14T09-51-55Z-jump+40",
+                      "2026-09-14T09-54-55Z-jump+40"].compactMap { gaps[$0] }
+        #expect(good.count == 3 && jumped.count == 3)
+        guard good.count == 3, jumped.count == 3 else { return }
+
+        let widening = jumped.reduce(0, +) / 3 - good.reduce(0, +) / 3
+        print(String(format: "JUMP widening %.2f ms (good %@, jumped %@)", widening,
+                     good.map { String(format: "%.1f", $0) }.joined(separator: "/"),
+                     jumped.map { String(format: "%.1f", $0) }.joined(separator: "/")))
+        #expect(abs(widening - 40) <= 2, "the +40 ms trim reads \(widening) ms")
+
+        // The speaker whose trim never moved. Its arrival is the earlier of
+        // the two in every window from the jump onwards, including the first
+        // window after the trim was taken back out.
+        let unmoved = ["2026-09-14T09-45-55Z-jump+40", "2026-09-14T09-51-55Z-jump+40",
+                       "2026-09-14T09-54-55Z-jump+40", "2026-09-14T10-01-16Z-good"]
+            .compactMap { secondSpeaker[$0] }
+        #expect(unmoved.count == 4)
+        if let low = unmoved.min(), let high = unmoved.max() {
+            #expect(high - low <= 2, "the untouched speaker moved: \(unmoved)")
         }
     }
 }

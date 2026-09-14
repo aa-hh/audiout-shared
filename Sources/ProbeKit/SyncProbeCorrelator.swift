@@ -289,14 +289,27 @@ public struct SyncProbeCorrelator {
     /// deliberately: a window a few hundred lags wide has no honest background
     /// of its own, and scoring a peak against its own immediate neighbourhood
     /// is how a matched filter flatters itself.
-    func arrival(inCorrelation corr: [Float], searchCount: Int, lags: Range<Int>) -> Arrival? {
+    ///
+    /// `claimed` lists lags another search has already taken, and
+    /// `claimRadius` how far around each of them this one must stay away. Both
+    /// the peak search and the runner-up that ``Arrival/peakMargin`` measures
+    /// skip that ground, so a second speaker whose window overlaps the first
+    /// one's can be asked what it hears APART from the arrival already
+    /// accounted for, and is not scored against it either. The background
+    /// estimates still count those lags: a loud arrival 40 ms away really is
+    /// part of what this correlation looks like.
+    func arrival(inCorrelation corr: [Float], searchCount: Int, lags: Range<Int>,
+                 claimed: [Int] = [], claimRadius: Int = 0) -> Arrival? {
         let lo = max(0, lags.lowerBound)
         let hi = min(searchCount, lags.upperBound)
         guard lo < hi, searchCount <= corr.count else { return nil }
+        func isClaimed(_ i: Int) -> Bool {
+            claimed.contains { abs(i - $0) <= claimRadius }
+        }
 
         var peakIndex = lo
         var peakValue = -Float.infinity
-        for i in lo..<hi where corr[i] > peakValue {
+        for i in lo..<hi where corr[i] > peakValue && !isClaimed(i) {
             peakValue = corr[i]
             peakIndex = i
         }
@@ -333,7 +346,8 @@ public struct SyncProbeCorrelator {
         // runner-up nearly matches is a coin toss the caller should not act on.
         let separation = max(1, Int(peakMarginSeparationSeconds * sampleRate))
         var runnerUp = -Float.infinity
-        for i in lo..<hi where abs(i - peakIndex) > separation && corr[i] > runnerUp {
+        for i in lo..<hi
+        where abs(i - peakIndex) > separation && corr[i] > runnerUp && !isClaimed(i) {
             runnerUp = corr[i]
         }
         let margin = runnerUp > 0 ? Double(peakValue) / Double(runnerUp) : .infinity
@@ -406,6 +420,31 @@ public struct SyncProbeCorrelator {
     static func correlate(recording: [Float], probe: [Float],
                           ambientNoise: [Float]?,
                           whiteningExponent: Double = 0) -> [Float]? {
+        correlations(recording: recording, probe: probe, ambientNoise: ambientNoise,
+                     whiteningExponent: whiteningExponent,
+                     bandEdgesHz: [], sampleRate: 0)?.full
+    }
+
+    /// ``correlate(recording:probe:ambientNoise:whiteningExponent:)`` plus one
+    /// correlation per frequency band, all from the same pair of forward
+    /// transforms.
+    ///
+    /// A band's correlation is that same cross-spectrum with the bins outside
+    /// the band set to zero, inverse-transformed. Masking a spectrum already
+    /// computed costs one inverse transform per band and shifts no phase, so a
+    /// band's peak sits at the lag that band would have produced had its two
+    /// time signals been filtered and correlated on their own. Filtering the
+    /// signals again per band would cost four more forward transforms for the
+    /// same answer.
+    ///
+    /// `bandEdgesHz` are the edges, rising, so four bands are five numbers.
+    /// Empty (the default) asks for no bands and does exactly the work of
+    /// ``correlate(recording:probe:ambientNoise:whiteningExponent:)``.
+    static func correlations(recording: [Float], probe: [Float],
+                             ambientNoise: [Float]?,
+                             whiteningExponent: Double = 0,
+                             bandEdgesHz: [Double], sampleRate: Double)
+        -> (full: [Float], bands: [[Float]])? {
         let n = fftLength(for: recording.count + probe.count)
         guard let forward = vDSP.DFT(count: n, direction: .forward,
                                      transformType: .complexComplex, ofType: Float.self),
@@ -457,7 +496,31 @@ public struct SyncProbeCorrelator {
                           outputReal: &corrRe, outputImaginary: &corrIm)
         let scale = 1 / Float(n)
         for k in 0..<n { corrRe[k] *= scale }
-        return corrRe
+
+        var bands: [[Float]] = []
+        if bandEdgesHz.count > 1, sampleRate > 0 {
+            bands.reserveCapacity(bandEdgesHz.count - 1)
+            for (low, high) in zip(bandEdgesHz, bandEdgesHz.dropFirst()) {
+                var bandRe = crossRe
+                var bandIm = crossIm
+                // A real signal's spectrum is symmetric, so bin k and bin n-k
+                // are the same frequency and have to be masked together.
+                for k in 0..<n {
+                    let hz = Double(min(k, n - k)) * sampleRate / Double(n)
+                    if hz < low || hz >= high {
+                        bandRe[k] = 0
+                        bandIm[k] = 0
+                    }
+                }
+                var bandCorrRe = [Float](repeating: 0, count: n)
+                var bandCorrIm = [Float](repeating: 0, count: n)
+                inverse.transform(inputReal: bandRe, inputImaginary: bandIm,
+                                  outputReal: &bandCorrRe, outputImaginary: &bandCorrIm)
+                for k in 0..<n { bandCorrRe[k] *= scale }
+                bands.append(bandCorrRe)
+            }
+        }
+        return (corrRe, bands)
     }
 
     /// Per-bin `1 / (noisePower + ε)` from a probe-free ambient slice: the

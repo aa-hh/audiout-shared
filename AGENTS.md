@@ -138,15 +138,24 @@ separating under a 23 dB level imbalance, echoes, hum, and every refusal path.
 `PassiveDriftFixtureTests` is the exception to "synthetic". It replays real
 dumped windows — the mix the Mac sent and what its microphone heard, in
 `Tests/ProbeKitTests/Fixtures` — through `PassiveDriftCorrelator` and prints
-what today's code scores on each. Most of the first four windows are refused,
-that refusal is the finding, and a test that failed on it would have to be
-deleted before the algorithm could be worked on at all. One window is asserted
-rather than printed: 21:13:33, the one the app accepted live at 574.3 ms and
-corrected a speaker on, has to stay refused by the margin and local-background
-gates, and the window with a real arrival at 570.6 ms has to stay accepted.
+what today's code scores on each. Twelve windows, from two live recordings:
+
+- The four from 2026-09-13 hold nothing the estimator can stand behind, and
+  that refusal is the finding — a test that failed on it would have to be
+  deleted before the algorithm could be worked on at all. Two are asserted:
+  21:13:33, the one the app accepted live at 574.3 ms and corrected a speaker
+  on, stays refused, and with the gates and the band vote switched off it comes
+  back, so the test says which code does the refusing.
+- The eight from 2026-09-14 are the labelled recording, music at a normal
+  level with the sender's dropped-cycle fault fixed. Three of them were
+  recorded with exactly +40 ms of trim added to one speaker: their two arrivals
+  sit about 55 ms apart where the untouched blocks' sit about 16 ms apart, and
+  the test reads that widening back as 39.2 ms.
+
 New windows need no code change: re-run `tools/make-drift-fixtures.py` over the
 new dump directory and commit what it writes. The tracked set is capped at
-5 MB, so roughly a dozen windows.
+5 MB — 12 windows is 4.0 MB of it — and `tools/drift-window-labels.txt` records
+how the tracked ones were labelled.
 
 The Mac repo's `dev/drift-window-analysis.py` reads the same fixtures
 (`--fixtures <dir> --swift <this suite's output>`) and checks its own answer

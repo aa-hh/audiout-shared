@@ -28,13 +28,27 @@ public struct DriftPeak: Equatable, Sendable {
     /// search window. 1 means the runner-up matched the winner. Same statement
     /// as ``SyncProbeCorrelator/Arrival/peakMargin``.
     public var margin: Double
+    /// How many of the four sub-bands put their own best lag within
+    /// ``PassiveDriftCorrelator/bandAgreementToleranceMs`` of this one.
+    ///
+    /// The music's own repeat is a feature of the band that carries the
+    /// repeat, usually the bass; a real arrival is the same event in every
+    /// band at once. So four narrow correlations vote, and a lag only the
+    /// loudest band believes in is not an arrival.
+    public var agreeingBands: Int
+    /// How far apart the agreeing bands' own lags sit, ms — 0 when fewer than
+    /// two agree. Small means the bands landed on one event.
+    public var bandSpreadMs: Double
 
     public init(delayMs: Double, confidence: Double,
-                localConfidence: Double = .infinity, margin: Double = .infinity) {
+                localConfidence: Double = .infinity, margin: Double = .infinity,
+                agreeingBands: Int = 4, bandSpreadMs: Double = 0) {
         self.delayMs = delayMs
         self.confidence = confidence
         self.localConfidence = localConfidence
         self.margin = margin
+        self.agreeingBands = agreeingBands
+        self.bandSpreadMs = bandSpreadMs
     }
 }
 
@@ -84,6 +98,12 @@ public enum DriftOutcome: Equatable, Sendable {
 /// cross-spectrum partially by the reference's own magnitude
 /// (``whiteningExponent``), which the chirp path does not, because a sweep is
 /// already flat across its band and a pop mix is not.
+///
+/// A second thing differs: the whitened cross-spectrum is also masked into
+/// four bands and inverse-transformed again, and a lag is only an arrival when
+/// three of those four bands put it in the same place. One sound reaches the
+/// microphone at one time in every band at once; a musical repeat belongs to
+/// the band that carries it.
 ///
 /// **Two things make program audio harder than a sweep, and both are handled
 /// by refusing rather than guessing.** Music is not broadband white — quiet,
@@ -167,6 +187,33 @@ public struct PassiveDriftCorrelator: Sendable {
     /// being the noise window, which scores about 1 by construction.
     public var minLocalScore: Double = 2.4
 
+    /// How many of the four sub-bands have to land on a lag before it is
+    /// reported as an arrival.
+    ///
+    /// A sound leaving a speaker arrives at one time, and every band that can
+    /// hear it puts it there. A musical repeat does not: a bass line that
+    /// comes round every 10 ms makes a false peak in the bottom band and
+    /// nothing at all in the top one. Three of four leaves room for the one
+    /// band the program happens to be quiet in, and still refuses a lag that
+    /// only the band carrying the repeat believes.
+    ///
+    /// The four bands are geometric across ``timingBandLowHz`` to
+    /// ``timingBandHighHz``, and the music below 300 Hz is not among them —
+    /// that is where the mic hears best and where the repeats live, so it
+    /// gets no vote at all.
+    public var minAgreeingBands: Int = 3
+
+    /// How far a band's own best lag may sit from the full-band lag and still
+    /// count as agreeing, ms.
+    ///
+    /// 1.5 ms is what the design brief asked for, and it is roughly what a
+    /// band this narrow can resolve: the bottom band spans 400 Hz, so its
+    /// correlation lobe is a couple of milliseconds wide and its peak can sit
+    /// a millisecond off the full-band one while describing the same arrival.
+    /// Tighter than that would refuse real agreement; looser would let the
+    /// nearest repeat count as a vote.
+    public var bandAgreementToleranceMs: Double = 1.5
+
     /// A reference slice quieter than this (RMS, full scale) is refused. −50
     /// dBFS: below it the retained program is a fade or a gap, not material.
     public var minReferenceRMS: Double = 0.003_16
@@ -226,8 +273,9 @@ public struct PassiveDriftCorrelator: Sendable {
     /// buys its score by lifting the background.
     public var whiteningExponent: Double = 0.7
 
-    /// Two candidates closer together than this are the same arrival found by
-    /// two overlapping search windows; the weaker is dropped.
+    /// Two search windows that land this close together have found the same
+    /// arrival; the baseline nearer to it keeps it and the other looks again
+    /// with that lag ruled out.
     ///
     /// 1 ms, not the 5 ms this started at, because whitening sharpens the
     /// lobe to a fraction of a millisecond where the plain filter's was
@@ -275,9 +323,12 @@ public struct PassiveDriftCorrelator: Sendable {
     /// `.noConvincingPeak` window says whether the true arrival scored just
     /// under ``minPeakToSidelobe`` or was never in the window.
     ///
-    /// Candidates clear none of the three gates: each carries its whole-tape
-    /// confidence, its local one and its margin as measured, so a refused
-    /// window's log line says which gate stopped it.
+    /// Candidates clear none of the four gates: each carries its whole-tape
+    /// confidence, its local one, its margin and its band vote as measured, so
+    /// a refused window's log line says which gate stopped it. A candidate's
+    /// delay is the full-band lag; an accepted peak's is the one the agreeing
+    /// bands settled on, which sits within
+    /// ``bandAgreementToleranceMs`` of it.
     ///
     /// `candidates` follows `expectedDelaysMs` order, from the correlation
     /// that decided `outcome` (noise-weighted when that found a peak, plain
@@ -314,68 +365,157 @@ public struct PassiveDriftCorrelator: Sendable {
         let ambientNoise = ambientNoise.map { bandLimited($0, rate: captureRate) }
         let searchCount = capture.count - probe.count + 1
 
-        var correlator = SyncProbeCorrelator(sampleRate: captureRate)
-        correlator.minPeakToSidelobe = minPeakToSidelobe
-
+        let centres = expectedDelaysMs.map { Int(($0 / 1000 * captureRate).rounded()) }
         let halfWidth = Int((searchHalfWidthMs / 1000 * captureRate).rounded())
-        let windows = expectedDelaysMs.map { delayMs -> Range<Int> in
-            let centre = Int((delayMs / 1000 * captureRate).rounded())
-            return (centre - halfWidth)..<(centre + halfWidth + 1)
+        let windows = centres.map { ($0 - halfWidth)..<($0 + halfWidth + 1) }
+        let bandEdges = Self.votingBandEdges(low: timingBandLowHz,
+                                             high: min(timingBandHighHz, captureRate / 2))
+
+        func measure(against ambient: [Float]?) -> [Measured]? {
+            guard let corr = SyncProbeCorrelator.correlations(
+                    recording: capture, probe: probe, ambientNoise: ambient,
+                    whiteningExponent: whiteningExponent,
+                    bandEdgesHz: bandEdges, sampleRate: captureRate),
+                  corr.full.count >= searchCount
+            else { return nil }
+            return measurements(full: corr.full, bands: corr.bands, searchCount: searchCount,
+                                windows: windows, centres: centres, rate: captureRate)
         }
 
         // Weighting first, plain filter as the fallback — the same order and
         // the same reason as `ProbeAnalyzer.analyze`: weighting is an
         // optimization for stationary noise, and its failure is never the
         // run's.
-        var found: [DriftPeak] = []
-        var deciding: [Float] = []
-        if let ambientNoise, !ambientNoise.isEmpty,
-           let corr = SyncProbeCorrelator.correlate(recording: capture, probe: probe,
-                                                    ambientNoise: ambientNoise,
-                                                    whiteningExponent: whiteningExponent),
-           corr.count >= searchCount {
-            found = peaks(in: corr, searchCount: searchCount, windows: windows,
-                          correlator: correlator, rate: captureRate)
-            if !found.isEmpty { deciding = corr }
+        var measured: [Measured] = []
+        if let ambientNoise, !ambientNoise.isEmpty, let weighted = measure(against: ambientNoise) {
+            measured = weighted
         }
-        if found.isEmpty {
-            guard let corr = SyncProbeCorrelator.correlate(recording: capture, probe: probe,
-                                                           ambientNoise: nil,
-                                                           whiteningExponent: whiteningExponent),
-                  corr.count >= searchCount
-            else { return (.unusable(.noConvincingPeak), []) }
-            found = peaks(in: corr, searchCount: searchCount, windows: windows,
-                          correlator: correlator, rate: captureRate)
-            deciding = corr
+        if !measured.contains(where: { accepts($0.peak) }) {
+            guard let plain = measure(against: nil) else {
+                return (.unusable(.noConvincingPeak), [])
+            }
+            measured = plain
         }
 
-        var unthresholded = correlator
-        unthresholded.minPeakToSidelobe = 0
-        let candidates = windows.compactMap { window -> DriftPeak? in
-            unthresholded.arrival(inCorrelation: deciding, searchCount: searchCount, lags: window)
-                .map { Self.peak($0, rate: captureRate) }
-        }
-        return (found.isEmpty ? .unusable(.noConvincingPeak) : .usable(found), candidates)
+        let found = measured
+            .filter { accepts($0.peak) }
+            .map { measurement -> DriftPeak in
+                var peak = measurement.peak
+                peak.delayMs = measurement.agreedDelayMs
+                return peak
+            }
+            .sorted { $0.confidence > $1.confidence }
+        return (found.isEmpty ? .unusable(.noConvincingPeak) : .usable(found),
+                measured.map(\.peak))
     }
 
     // MARK: - internals
 
-    /// Best lag per window, strongest first, with duplicates from overlapping
-    /// windows removed.
-    private func peaks(in corr: [Float], searchCount: Int, windows: [Range<Int>],
-                       correlator: SyncProbeCorrelator, rate: Double) -> [DriftPeak] {
-        let candidates = windows
-            .compactMap { correlator.arrival(inCorrelation: corr, searchCount: searchCount, lags: $0) }
-            .filter { $0.peakMargin >= minPeakMargin && $0.localScore >= minLocalScore }
-            .sorted { $0.peakToSidelobe > $1.peakToSidelobe }
+    /// One window's answer: the peak as measured, plus the lag the agreeing
+    /// bands settled on. A refused window reports the first and nothing acts
+    /// on the second.
+    private struct Measured {
+        var peak: DriftPeak
+        var agreedDelayMs: Double
+    }
 
-        let separation = peakSeparationSeconds * rate
-        var kept: [SyncProbeCorrelator.Arrival] = []
-        for candidate in candidates
-        where !kept.contains(where: { abs($0.sampleOffset - candidate.sampleOffset) < separation }) {
-            kept.append(candidate)
+    /// Every gate at once. A peak that clears all four is an arrival.
+    private func accepts(_ peak: DriftPeak) -> Bool {
+        peak.confidence >= minPeakToSidelobe
+            && peak.margin >= minPeakMargin
+            && peak.localConfidence >= minLocalScore
+            && peak.agreeingBands >= minAgreeingBands
+    }
+
+    /// One measurement per search window, in the caller's order, scored but
+    /// not judged.
+    ///
+    /// Two speakers whose search windows overlap would otherwise both report
+    /// the loudest arrival in the overlap and the second one would be lost —
+    /// with ±120 ms windows around baselines a few milliseconds apart, that is
+    /// every window. So the windows are resolved in one pass: the baseline
+    /// sitting closest to a shared peak keeps it, and a window whose peak has
+    /// been taken looks again with that ground ruled out. What comes back is a
+    /// candidate like any other and still has to clear the gates, so two
+    /// speakers that really did arrive together produce one peak and one
+    /// refusal rather than an invented second arrival.
+    private func measurements(full: [Float], bands: [[Float]], searchCount: Int,
+                              windows: [Range<Int>], centres: [Int],
+                              rate: Double) -> [Measured] {
+        var scorer = SyncProbeCorrelator(sampleRate: rate)
+        // The gates decide, so nothing is dropped before they see it.
+        scorer.minPeakToSidelobe = 0
+        let sameArrival = max(1, Int((peakSeparationSeconds * rate).rounded()))
+        let keepOut = max(1, Int((scorer.peakMarginSeparationSeconds * rate).rounded()))
+
+        let unconstrained = windows.map {
+            scorer.arrival(inCorrelation: full, searchCount: searchCount, lags: $0)
         }
-        return kept.map { Self.peak($0, rate: rate) }
+        func distanceFromBaseline(_ i: Int) -> Double {
+            guard let arrival = unconstrained[i] else { return .infinity }
+            return abs(arrival.sampleOffset - Double(centres[i]))
+        }
+        var claimed: [Int] = []
+        var resolved = [SyncProbeCorrelator.Arrival?](repeating: nil, count: windows.count)
+        for i in windows.indices.sorted(by: { distanceFromBaseline($0) < distanceFromBaseline($1) }) {
+            guard let first = unconstrained[i] else { continue }
+            let index = Int(first.sampleOffset.rounded())
+            if !claimed.contains(where: { abs($0 - index) <= sameArrival }) {
+                resolved[i] = first
+                claimed.append(index)
+            } else if let second = scorer.arrival(inCorrelation: full, searchCount: searchCount,
+                                                  lags: windows[i], claimed: claimed,
+                                                  claimRadius: keepOut) {
+                resolved[i] = second
+                claimed.append(Int(second.sampleOffset.rounded()))
+            }
+        }
+
+        // Scored last, once every claim is known: the arrival another speaker
+        // has been given is not a rival lag, and a window holding two speakers
+        // would otherwise report each of them as narrowly beaten by the other.
+        // The bands are asked the same question with the same ground ruled
+        // out, or they would all vote for whichever arrival is louder.
+        return windows.indices.compactMap { i -> Measured? in
+            guard let claim = resolved[i] else { return nil }
+            // Only a claim far enough away to count as a rival is ruled out.
+            // One inside the keep-out is part of this arrival's own skirt,
+            // which the margin already declines to score against, and ruling
+            // it out would take this peak with it.
+            let elsewhere = claimed.filter { abs(Double($0) - claim.sampleOffset) > Double(keepOut) }
+            guard let arrival = scorer.arrival(inCorrelation: full, searchCount: searchCount,
+                                               lags: windows[i], claimed: elsewhere,
+                                               claimRadius: keepOut)
+            else { return nil }
+            let lagMs = arrival.sampleOffset / rate * 1000
+            let bandLags = bands.compactMap { band -> Double? in
+                scorer.arrival(inCorrelation: band, searchCount: searchCount, lags: windows[i],
+                               claimed: elsewhere, claimRadius: keepOut)
+                    .map { $0.sampleOffset / rate * 1000 }
+            }
+            let agreeing = bandLags.filter { abs($0 - lagMs) <= bandAgreementToleranceMs }.sorted()
+            let spread = agreeing.count > 1 ? agreeing[agreeing.count - 1] - agreeing[0] : 0
+            var peak = Self.peak(arrival, rate: rate)
+            peak.agreeingBands = agreeing.count
+            peak.bandSpreadMs = spread
+            return Measured(peak: peak, agreedDelayMs: Self.median(agreeing) ?? lagMs)
+        }
+    }
+
+    /// The voting bands' edges, geometric across the band the matched filter
+    /// already judges — four bands, five numbers. The same edges the Mac's
+    /// replay harness (`dev/drift-window-analysis.py`) prints in its `bands`
+    /// row, so the two answers are about the same signals.
+    static func votingBandEdges(low: Double, high: Double, count: Int = 4) -> [Double] {
+        guard low > 0, high > low, count > 0 else { return [] }
+        let ratio = pow(high / low, 1 / Double(count))
+        return (0...count).map { low * pow(ratio, Double($0)) }
+    }
+
+    private static func median(_ sorted: [Double]) -> Double? {
+        guard !sorted.isEmpty else { return nil }
+        let mid = sorted.count / 2
+        return sorted.count.isMultiple(of: 2) ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
     }
 
     private static func peak(_ arrival: SyncProbeCorrelator.Arrival, rate: Double) -> DriftPeak {
