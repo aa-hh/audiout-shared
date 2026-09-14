@@ -1,0 +1,26 @@
+{
+  "bandHz": [
+    200.0,
+    8000.0
+  ],
+  "baselines": [
+    {
+      "anchor": false,
+      "expectedDelayMs": 587.3771641698738
+    },
+    {
+      "anchor": false,
+      "expectedDelayMs": 587.3771641698738
+    }
+  ],
+  "captureCount": 96000,
+  "captureFullScale": 0.07931217740786957,
+  "captureRate": 24000,
+  "label": "jump+40",
+  "name": "2026-09-14T09-54-55Z-jump+40",
+  "referenceCount": 77824,
+  "referenceFullScale": 0.3570376216245921,
+  "referenceRate": 24000,
+  "sourceCaptureRate": 48000,
+  "sourceReferenceRate": 44100
+}

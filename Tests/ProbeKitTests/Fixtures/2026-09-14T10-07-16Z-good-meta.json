@@ -1,0 +1,26 @@
+{
+  "bandHz": [
+    200.0,
+    8000.0
+  ],
+  "baselines": [
+    {
+      "anchor": false,
+      "expectedDelayMs": 558.6920382139606
+    },
+    {
+      "anchor": false,
+      "expectedDelayMs": 558.6920382139606
+    }
+  ],
+  "captureCount": 96000,
+  "captureFullScale": 0.10840438822931721,
+  "captureRate": 24000,
+  "label": "good",
+  "name": "2026-09-14T10-07-16Z-good",
+  "referenceCount": 78512,
+  "referenceFullScale": 0.47470377603695335,
+  "referenceRate": 24000,
+  "sourceCaptureRate": 48000,
+  "sourceReferenceRate": 44100
+}
