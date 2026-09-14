@@ -196,6 +196,25 @@ public struct SyncProbeCorrelator {
     /// what actually makes reverb harmless.
     public var reverbShadowSeconds: Double = 0.25
 
+    /// Half-width of the neighbourhood around the peak that
+    /// ``Arrival/localScore`` measures its background over.
+    ///
+    /// ±300 ms because that is what the Mac's replay harness
+    /// (`dev/drift-window-analysis.py`, its `local` column) uses, and these
+    /// two numbers are compared against each other. It is wide enough to hold
+    /// several repeats of a musical bar and narrow enough that the lags in it
+    /// are the ones the peak actually competes with.
+    public var localBackgroundHalfWidthSeconds: Double = 0.3
+
+    /// How far from the best lag another lag has to sit before
+    /// ``Arrival/peakMargin`` counts it as a rival rather than as part of the
+    /// same arrival.
+    ///
+    /// 3 ms, matching the same harness (its `p2p` column). The design brief
+    /// said 5 ms in prose; the harness is what the two sides are measured
+    /// against, so 3 ms is what ships.
+    public var peakMarginSeparationSeconds: Double = 0.003
+
     /// `median(|x|) = 0.6745 σ` for zero-mean Gaussian `x` — the constant that
     /// turns a robust median into a standard deviation.
     private static let medianOfHalfNormal = 0.674_489_750_196_081_7
@@ -214,6 +233,22 @@ public struct SyncProbeCorrelator {
         /// to the arrival's own reverb, which reads as evidence against the
         /// very peak it came from.
         public var peakToSidelobe: Double
+        /// The same statement as ``peakToSidelobe``, but measured against the
+        /// background within ``SyncProbeCorrelator/localBackgroundHalfWidthSeconds``
+        /// of the peak instead of the whole tape.
+        ///
+        /// A whole-tape background is dominated by lags nowhere near the peak.
+        /// When the reference is music rather than a sweep, the lags that can
+        /// actually be mistaken for the arrival are its own neighbours — the
+        /// same bar one repeat later — and those are the ones this measures
+        /// against. Infinity when the neighbourhood holds too few lags to
+        /// summarise.
+        public var localScore: Double
+        /// Peak height over the highest rival lag inside the searched range:
+        /// the best lag more than ``SyncProbeCorrelator/peakMarginSeparationSeconds``
+        /// away from this one. 1 means the runner-up matched the winner;
+        /// infinity when there is no positive rival at all.
+        public var peakMargin: Double
     }
 
     /// Two arrivals from one recording, reduced to the number the sync engine
@@ -275,11 +310,33 @@ public struct SyncProbeCorrelator {
             background.append(abs(corr[i]))
         }
         guard background.count > 1 else { return nil }
-        background.sort()
-        let sigma = Double(background[background.count / 2]) / Self.medianOfHalfNormal
-        let sidelobe = (2 * log(Double(background.count))).squareRoot() * sigma
-        let psr = sidelobe > 0 ? Double(peakValue) / sidelobe : .infinity
+        let psr = Self.score(peak: peakValue, background: &background)
         guard psr >= minPeakToSidelobe else { return nil }
+
+        // The same estimate over the lags right around the peak. No reverb
+        // shadow here: a 250 ms shadow inside a ±300 ms neighbourhood would
+        // leave only the lags ahead of the peak, which is a different
+        // measurement, and the harness this number is compared against
+        // excludes the peak symmetrically.
+        let neighbourhood = max(1, Int(localBackgroundHalfWidthSeconds * sampleRate))
+        var localBackground: [Float] = []
+        localBackground.reserveCapacity(2 * neighbourhood)
+        for i in max(0, peakIndex - neighbourhood)..<min(searchCount, peakIndex + neighbourhood)
+        where abs(i - peakIndex) > exclusion {
+            localBackground.append(abs(corr[i]))
+        }
+        let localScore = localBackground.count > 1
+            ? Self.score(peak: peakValue, background: &localBackground) : .infinity
+
+        // The strongest lag that is not this arrival. Whether it is a rival
+        // reading of the same sound or the music's next repeat, a peak the
+        // runner-up nearly matches is a coin toss the caller should not act on.
+        let separation = max(1, Int(peakMarginSeparationSeconds * sampleRate))
+        var runnerUp = -Float.infinity
+        for i in lo..<hi where abs(i - peakIndex) > separation && corr[i] > runnerUp {
+            runnerUp = corr[i]
+        }
+        let margin = runnerUp > 0 ? Double(peakValue) / Double(runnerUp) : .infinity
 
         // Parabola through the peak and its neighbours: the sweep's main lobe
         // spans several samples (≈ sampleRate / bandwidth), so three points
@@ -294,7 +351,17 @@ public struct SyncProbeCorrelator {
                 offset += 0.5 * (cm - cp) / denom
             }
         }
-        return Arrival(sampleOffset: offset, peakToSidelobe: psr)
+        return Arrival(sampleOffset: offset, peakToSidelobe: psr,
+                       localScore: localScore, peakMargin: margin)
+    }
+
+    /// Peak height over the largest value this many lags of background are
+    /// EXPECTED to reach. Sorts in place, so the caller's array is consumed.
+    private static func score(peak: Float, background: inout [Float]) -> Double {
+        background.sort()
+        let sigma = Double(background[background.count / 2]) / medianOfHalfNormal
+        let sidelobe = (2 * log(Double(background.count))).squareRoot() * sigma
+        return sidelobe > 0 ? Double(peak) / sidelobe : .infinity
     }
 
     /// The one-shot calibration read: both probes located in one recording,

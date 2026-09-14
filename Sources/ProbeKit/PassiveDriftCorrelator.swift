@@ -20,10 +20,21 @@ public struct DriftPeak: Equatable, Sendable {
     /// the same statement as ``SyncProbeCorrelator/Arrival/peakToSidelobe``.
     /// Pure noise scores ~1.
     public var confidence: Double
+    /// ``confidence`` measured against the lags within 300 ms of the peak
+    /// instead of the whole tape — the background the peak actually competes
+    /// with. Same statement as ``SyncProbeCorrelator/Arrival/localScore``.
+    public var localConfidence: Double
+    /// Peak height over the best rival lag more than 3 ms away inside the same
+    /// search window. 1 means the runner-up matched the winner. Same statement
+    /// as ``SyncProbeCorrelator/Arrival/peakMargin``.
+    public var margin: Double
 
-    public init(delayMs: Double, confidence: Double) {
+    public init(delayMs: Double, confidence: Double,
+                localConfidence: Double = .infinity, margin: Double = .infinity) {
         self.delayMs = delayMs
         self.confidence = confidence
+        self.localConfidence = localConfidence
+        self.margin = margin
     }
 }
 
@@ -118,7 +129,43 @@ public struct PassiveDriftCorrelator: Sendable {
     /// The gap is narrow, which is why the search window and the suitability
     /// checks do most of the work and this threshold only catches what they
     /// let through.
+    ///
+    /// It is also no longer the only thing a peak has to clear: the whole-tape
+    /// background cannot see the music's own next repeat, so ``minPeakMargin``
+    /// and ``minLocalScore`` are what actually separate an arrival from one.
+    /// A caller that lowered this number to accept quieter arrivals can put it
+    /// back — that was what the live 2.3 was for.
     public var minPeakToSidelobe: Double = 3
+
+    /// A peak whose best rival inside the same search window comes closer than
+    /// this ratio is not reported, whatever it scored.
+    ///
+    /// The one number over the whole tape cannot tell a real arrival from the
+    /// music's next repeat, because the repeat sits tens of milliseconds away
+    /// while most of that background is lags nowhere near either. This gate
+    /// asks the question the whole-tape score cannot: inside the range the
+    /// caller actually searched, is the winner clear of the runner-up?
+    ///
+    /// 1.2 from the four live windows in `PassiveDriftFixtureTests`. The
+    /// window with a repeatable arrival (21:16:33, arrival at 570.6 ms) clears
+    /// its runner-up by 1.31; the three windows with nothing to find reach
+    /// 1.02, 1.05 and 1.10. 1.2 is the middle of that gap. The design brief
+    /// proposed 1.5 as a starting point, which these fixtures rule out — it
+    /// refuses the one true arrival among them.
+    public var minPeakMargin: Double = 1.2
+
+    /// A peak whose ``SyncProbeCorrelator/Arrival/localScore`` is below this is
+    /// not reported, whatever it scored over the whole tape.
+    ///
+    /// The whole-tape background is mostly quiet lags far from the peak, so a
+    /// peak that barely stands out from its own neighbourhood can still score
+    /// well on it. This gate measures the peak against the 300 ms either side
+    /// of it, where the music's own repeats are.
+    ///
+    /// 2.4 from the same four windows: the real arrival scores 3.06 locally,
+    /// and the three unusable windows reach 1.58, 1.90 and 0.90 — the last
+    /// being the noise window, which scores about 1 by construction.
+    public var minLocalScore: Double = 2.4
 
     /// A reference slice quieter than this (RMS, full scale) is refused. −50
     /// dBFS: below it the retained program is a fade or a gap, not material.
@@ -228,6 +275,10 @@ public struct PassiveDriftCorrelator: Sendable {
     /// `.noConvincingPeak` window says whether the true arrival scored just
     /// under ``minPeakToSidelobe`` or was never in the window.
     ///
+    /// Candidates clear none of the three gates: each carries its whole-tape
+    /// confidence, its local one and its margin as measured, so a refused
+    /// window's log line says which gate stopped it.
+    ///
     /// `candidates` follows `expectedDelaysMs` order, from the correlation
     /// that decided `outcome` (noise-weighted when that found a peak, plain
     /// otherwise). A window with no positive correlation or no room inside the
@@ -302,7 +353,7 @@ public struct PassiveDriftCorrelator: Sendable {
         unthresholded.minPeakToSidelobe = 0
         let candidates = windows.compactMap { window -> DriftPeak? in
             unthresholded.arrival(inCorrelation: deciding, searchCount: searchCount, lags: window)
-                .map { DriftPeak(delayMs: $0.sampleOffset / captureRate * 1000, confidence: $0.peakToSidelobe) }
+                .map { Self.peak($0, rate: captureRate) }
         }
         return (found.isEmpty ? .unusable(.noConvincingPeak) : .usable(found), candidates)
     }
@@ -315,6 +366,7 @@ public struct PassiveDriftCorrelator: Sendable {
                        correlator: SyncProbeCorrelator, rate: Double) -> [DriftPeak] {
         let candidates = windows
             .compactMap { correlator.arrival(inCorrelation: corr, searchCount: searchCount, lags: $0) }
+            .filter { $0.peakMargin >= minPeakMargin && $0.localScore >= minLocalScore }
             .sorted { $0.peakToSidelobe > $1.peakToSidelobe }
 
         let separation = peakSeparationSeconds * rate
@@ -323,8 +375,14 @@ public struct PassiveDriftCorrelator: Sendable {
         where !kept.contains(where: { abs($0.sampleOffset - candidate.sampleOffset) < separation }) {
             kept.append(candidate)
         }
-        return kept.map { DriftPeak(delayMs: $0.sampleOffset / rate * 1000,
-                                    confidence: $0.peakToSidelobe) }
+        return kept.map { Self.peak($0, rate: rate) }
+    }
+
+    private static func peak(_ arrival: SyncProbeCorrelator.Arrival, rate: Double) -> DriftPeak {
+        DriftPeak(delayMs: arrival.sampleOffset / rate * 1000,
+                  confidence: arrival.peakToSidelobe,
+                  localConfidence: arrival.localScore,
+                  margin: arrival.peakMargin)
     }
 
     /// Nil when the band-limited slice can carry a timing measurement.

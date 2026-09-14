@@ -138,16 +138,23 @@ separating under a 23 dB level imbalance, echoes, hum, and every refusal path.
 `PassiveDriftFixtureTests` is the exception to "synthetic". It replays real
 dumped windows — the mix the Mac sent and what its microphone heard, in
 `Tests/ProbeKitTests/Fixtures` — through `PassiveDriftCorrelator` and prints
-what today's code scores on each. It asserts only that the fixtures load and
-decode. Most of the first four windows are refused, that refusal is the
-finding, and a test that failed on it would have to be deleted before the
-algorithm could be worked on at all. New windows need no code change: re-run
-`tools/make-drift-fixtures.py` over the new dump directory and commit what it
-writes. The tracked set is capped at 5 MB, so roughly a dozen windows.
+what today's code scores on each. Most of the first four windows are refused,
+that refusal is the finding, and a test that failed on it would have to be
+deleted before the algorithm could be worked on at all. One window is asserted
+rather than printed: 21:13:33, the one the app accepted live at 574.3 ms and
+corrected a speaker on, has to stay refused by the margin and local-background
+gates, and the window with a real arrival at 570.6 ms has to stay accepted.
+New windows need no code change: re-run `tools/make-drift-fixtures.py` over the
+new dump directory and commit what it writes. The tracked set is capped at
+5 MB, so roughly a dozen windows.
 
 The Mac repo's `dev/drift-window-analysis.py` reads the same fixtures
-(`--fixtures <dir> --swift <this suite's output>`) and checks its own
-plain-filter score against the Swift one.
+(`--fixtures <dir> --swift <this suite's output>`) and checks its own answer
+against the Swift one. Its replica of this package's correlator predates the
+whitening, so until that script divides the cross-spectrum by the reference's
+magnitude to the 0.7 as `PassiveDriftCorrelator` does, its parity mode compares
+two different signals and reports 9–51% disagreement on windows that in fact
+agree to 0.03%.
 
 Note this repo has none of the Mac repo's hooks, so nothing stops a bare
 `swift` command here and nothing runs these tests for you on commit.

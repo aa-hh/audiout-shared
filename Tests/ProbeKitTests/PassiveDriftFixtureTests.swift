@@ -113,8 +113,56 @@ import Testing
             // Mac repo is compared against: `drift-window-analysis.py
             // --fixtures <dir> --swift <this output>`.
             for (expected, candidate) in zip(fixture.expectedDelaysMs, result.candidates) {
-                print(String(format: "CANDIDATE %@ expected=%.2f lag=%.2f score=%.4f",
-                             fixture.name, expected, candidate.delayMs, candidate.confidence))
+                print(String(format: "CANDIDATE %@ expected=%.2f lag=%.2f score=%.4f local=%.4f margin=%.4f",
+                             fixture.name, expected, candidate.delayMs, candidate.confidence,
+                             candidate.localConfidence, candidate.margin))
+            }
+        }
+    }
+
+    /// The two gates, at the score threshold the Mac app ran live.
+    ///
+    /// Live test 3 (2026-09-13) accepted the 21:13:33 window at 574.3 ms with
+    /// a whole-tape score of 2.40 and corrected a speaker that had not moved.
+    /// Its peak stands 2% clear of the next lag in the same window, which is
+    /// what the gates read; the whole-tape score cannot see that at all. So
+    /// this fixes both halves: with the gates off, 2.3 accepts that window
+    /// again — the defect — and with them on it is refused while the window
+    /// that holds a real arrival still passes.
+    @Test func gatesRefuseWhatTheScoreAloneAccepted() throws {
+        var correlator = PassiveDriftCorrelator()
+        correlator.minPeakToSidelobe = 2.3
+
+        var ungated = correlator
+        ungated.minPeakMargin = 0
+        ungated.minLocalScore = 0
+
+        for fixture in try Self.manifest() {
+            let reference = try fixture.reference(in: Self.directory)
+            let capture = try fixture.capture(in: Self.directory)
+            func analyze(_ correlator: PassiveDriftCorrelator) -> DriftOutcome {
+                correlator.analyze(reference: reference, referenceRate: fixture.referenceRate,
+                                   capture: capture, captureRate: fixture.captureRate,
+                                   expectedDelaysMs: fixture.expectedDelaysMs,
+                                   searchHalfWidthMs: 120)
+            }
+
+            switch fixture.name {
+            case "2026-09-13T21-16-33Z-good":
+                guard case .usable(let peaks) = analyze(correlator) else {
+                    Issue.record("the window with a real arrival is refused: \(analyze(correlator))")
+                    continue
+                }
+                #expect(abs(peaks[0].delayMs - 570.6) < 1,
+                        "the accepted arrival moved: \(peaks[0].delayMs) ms")
+            case "2026-09-13T21-13-33Z-good":
+                #expect(analyze(correlator) == .unusable(.noConvincingPeak),
+                        "the window that caused a wrong correction is accepted again")
+                #expect(analyze(ungated) != .unusable(.noConvincingPeak),
+                        "the gates have stopped being what refuses it")
+            default:
+                #expect(analyze(correlator) == .unusable(.noConvincingPeak),
+                        "\(fixture.name) (\(fixture.label)) should have nothing to find")
             }
         }
     }
