@@ -342,4 +342,91 @@ import Testing
 
         #expect(outcome == .unusable(.noConvincingPeak))
     }
+    /// Two speakers 40 ms apart, searched with the ±120 ms windows the Mac
+    /// actually uses, are two arrivals.
+    ///
+    /// Both windows hold both arrivals, so both baselines pick the same global
+    /// maximum and the second speaker is lost — that is what the live code
+    /// did, and it is what made a forced +40 ms trim unreadable. The baseline
+    /// nearest the shared peak keeps it now and the other looks again with
+    /// that lag ruled out. Red if that resolution is removed: one peak comes
+    /// back, and the `peaks.count == 2` line fails.
+    @Test func resolvesTwoSpeakersWhoseSearchWindowsOverlap() {
+        let rate = Self.rate
+        let reference = Self.programSlice(seconds: 1.0, rate: rate)
+        let tape = Self.capture(seconds: 2.0, rate: rate,
+                                arrivals: [(120.0, 0.5), (160.0, 0.42)], snrDB: 15)
+
+        let outcome = PassiveDriftCorrelator().analyze(
+            reference: reference, referenceRate: rate,
+            capture: tape, captureRate: rate,
+            expectedDelaysMs: [160, 120], searchHalfWidthMs: 120)
+
+        guard case .usable(let peaks) = outcome else {
+            Issue.record("expected both speakers, got \(outcome)")
+            return
+        }
+        #expect(peaks.count == 2)
+        let delays = peaks.map(\.delayMs).sorted()
+        #expect(abs(delays[0] - 120.0) < 1)
+        #expect(abs(delays[1] - 160.0) < 1)
+    }
+
+    /// One arrival inside two overlapping windows stays ONE arrival.
+    ///
+    /// The caller reads a peak that is the only peak in two speakers' windows
+    /// as those speakers having arrived together, and acts by leaving them
+    /// alone. The second look that the test above relies on must therefore
+    /// offer a candidate, not invent an arrival: with nothing else in the
+    /// capture, what it finds is background and the gates and the band vote
+    /// refuse it.
+    @Test func oneArrivalInTwoWindowsStaysOneArrival() {
+        let rate = Self.rate
+        let reference = Self.programSlice(seconds: 1.0, rate: rate)
+        let tape = Self.capture(seconds: 2.0, rate: rate, arrivals: [(140.0, 0.5)], snrDB: 15)
+
+        let outcome = PassiveDriftCorrelator().analyze(
+            reference: reference, referenceRate: rate,
+            capture: tape, captureRate: rate,
+            expectedDelaysMs: [137, 143], searchHalfWidthMs: 120)
+
+        guard case .usable(let peaks) = outcome else {
+            Issue.record("expected the one arrival, got \(outcome)")
+            return
+        }
+        #expect(peaks.count == 1)
+        #expect(abs(peaks[0].delayMs - 140.0) < 1)
+    }
+
+    /// Two speakers a millisecond and a half apart are two arrivals; half a
+    /// millisecond apart they are one. `peakSeparationSeconds` draws that line
+    /// at 1 ms, where a plain matched filter's 5 ms merged a resolved pair
+    /// back into a single reported arrival — and a merged arrival means
+    /// something to the caller: one peak alone in two speakers' windows is how
+    /// it decides those speakers are in sync. Red at the old 5 ms, which
+    /// reports the 1.5 ms pair as one.
+    ///
+    /// The search windows here are narrow, one per arrival, because that is
+    /// the only arrangement in which the two windows pick different lags and
+    /// the separation rule has anything to decide.
+    @Test(arguments: [(gapMs: 1.5, expectedPeaks: 2), (gapMs: 0.5, expectedPeaks: 1)])
+    func separatesArrivalsOverAMillisecondApart(gapMs: Double, expectedPeaks: Int) {
+        let rate = Self.rate
+        let first = 37.4
+        let reference = Self.programSlice(seconds: 1.0, rate: rate)
+        let tape = Self.capture(seconds: 2.0, rate: rate,
+                                arrivals: [(first, 0.5), (first + gapMs, 0.5)], snrDB: 15)
+
+        let outcome = PassiveDriftCorrelator().analyze(
+            reference: reference, referenceRate: rate,
+            capture: tape, captureRate: rate,
+            expectedDelaysMs: [first, first + gapMs], searchHalfWidthMs: gapMs / 2)
+
+        guard case .usable(let peaks) = outcome else {
+            Issue.record("expected the \(gapMs) ms pair to be measurable, got \(outcome)")
+            return
+        }
+        #expect(peaks.count == expectedPeaks)
+    }
+
 }

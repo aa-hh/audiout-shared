@@ -24,7 +24,8 @@ let package = Package(
         .target(name: "AudioutProtocol"),
         .testTarget(name: "AudioutProtocolTests", dependencies: ["AudioutProtocol"]),
         .target(name: "ProbeKit"),
-        .testTarget(name: "ProbeKitTests", dependencies: ["ProbeKit"]),
+        .testTarget(name: "ProbeKitTests", dependencies: ["ProbeKit"],
+                    resources: [.copy("Fixtures")]),
         .target(name: "AudioutField", resources: [.process("field.json"), .process("stage-look.json")]),
         .testTarget(name: "AudioutFieldTests", dependencies: ["AudioutField"]),
     ]

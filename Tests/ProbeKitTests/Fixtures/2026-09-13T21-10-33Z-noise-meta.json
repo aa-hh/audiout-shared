@@ -1,0 +1,26 @@
+{
+  "bandHz": [
+    200.0,
+    8000.0
+  ],
+  "baselines": [
+    {
+      "anchor": false,
+      "expectedDelayMs": 537
+    },
+    {
+      "anchor": false,
+      "expectedDelayMs": 529
+    }
+  ],
+  "captureCount": 91200,
+  "captureFullScale": 1.6195302006269916,
+  "captureRate": 24000,
+  "label": "noise",
+  "name": "2026-09-13T21-10-33Z-noise",
+  "referenceCount": 74232,
+  "referenceFullScale": 0.3570214881998782,
+  "referenceRate": 24000,
+  "sourceCaptureRate": 48000,
+  "sourceReferenceRate": 44100
+}

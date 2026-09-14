@@ -321,4 +321,36 @@ import Testing
                     "noise weighting never costs confidence on the scene it models")
         }
     }
+
+    /// The wizard's chirp path must be exactly what it was before the passive
+    /// drift path needed whitening. This scene's answer and score are the
+    /// numbers the unmodified correlator produced (2026-09-14, run against
+    /// both versions of the file); the correlation arrays at exponent 0 and
+    /// with no exponent at all are compared sample for sample as well, so a
+    /// future weighting cannot quietly apply itself to a caller that asked
+    /// for none. Red if whitening reaches the chirp path by default.
+    @Test func whiteningLeavesTheChirpPathAlone() {
+        let up = Self.fastUp()
+        let probe = SyncProbe.samples(up)
+        let recording = renderScene(length: 16_000, sampleRate: Self.fastRate,
+                                    probes: [PlacedProbe(design: up, delaySamples: 3210.4, gain: 0.8),
+                                             PlacedProbe(design: Self.fastDown(),
+                                                         delaySamples: 5120.7, gain: 0.5)],
+                                    noiseRMS: 0.02)
+
+        let arrival = SyncProbeCorrelator(sampleRate: Self.fastRate).arrival(of: probe, in: recording)
+        #expect(arrival != nil)
+        if let arrival {
+            #expect(abs(arrival.sampleOffset - 3210.375_638_319_296_7) < 1e-6)
+            #expect(abs(arrival.peakToSidelobe - 54.723_266_826_380_05) < 1e-6)
+        }
+
+        let unweighted = SyncProbeCorrelator.correlate(recording: recording, probe: probe,
+                                                       ambientNoise: nil)
+        let atZero = SyncProbeCorrelator.correlate(recording: recording, probe: probe,
+                                                   ambientNoise: nil, whiteningExponent: 0)
+        #expect(unweighted != nil)
+        #expect(unweighted == atZero)
+    }
+
 }

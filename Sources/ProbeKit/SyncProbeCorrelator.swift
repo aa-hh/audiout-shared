@@ -141,10 +141,17 @@ public enum SyncProbe {
 /// segment (a lead-in slice of the same recording, before the probes start),
 /// correlation bins are divided by the measured noise power spectrum, so a
 /// tonal interferer (a hum, a voice) is discounted instead of being whitened
-/// up to equal vote. PHAT-style whitening is deliberately absent — it throws
-/// away per-band SNR, which is exactly the information a noisy party room
-/// needs (the 2026 TDOA-probing result: trained estimators learn
-/// magnitude-aware weighting and never learn PHAT).
+/// up to equal vote. The chirp path adds no whitening on top of that: a
+/// sweep's magnitude is already flat across its band, so dividing by it buys
+/// nothing and throws away per-band SNR, which is exactly the information a
+/// noisy party room needs (the 2026 TDOA-probing result: trained estimators
+/// learn magnitude-aware weighting and never learn PHAT).
+///
+/// ``correlate(recording:probe:ambientNoise:whiteningExponent:)`` does take a
+/// whitening exponent, defaulted to 0 so every chirp caller keeps the filter
+/// above. ``PassiveDriftCorrelator`` passes a non-zero value because its
+/// reference is music, not a sweep: a pop mix's magnitude is anything but
+/// flat, and its bass repeats often enough to own the correlation background.
 ///
 /// **Confidence is measured against the background's EXPECTED largest lag,
 /// never its observed one.** The observed maximum is one sample out of a
@@ -189,6 +196,25 @@ public struct SyncProbeCorrelator {
     /// what actually makes reverb harmless.
     public var reverbShadowSeconds: Double = 0.25
 
+    /// Half-width of the neighbourhood around the peak that
+    /// ``Arrival/localScore`` measures its background over.
+    ///
+    /// ±300 ms because that is what the Mac's replay harness
+    /// (`dev/drift-window-analysis.py`, its `local` column) uses, and these
+    /// two numbers are compared against each other. It is wide enough to hold
+    /// several repeats of a musical bar and narrow enough that the lags in it
+    /// are the ones the peak actually competes with.
+    public var localBackgroundHalfWidthSeconds: Double = 0.3
+
+    /// How far from the best lag another lag has to sit before
+    /// ``Arrival/peakMargin`` counts it as a rival rather than as part of the
+    /// same arrival.
+    ///
+    /// 3 ms, matching the same harness (its `p2p` column). The design brief
+    /// said 5 ms in prose; the harness is what the two sides are measured
+    /// against, so 3 ms is what ships.
+    public var peakMarginSeparationSeconds: Double = 0.003
+
     /// `median(|x|) = 0.6745 σ` for zero-mean Gaussian `x` — the constant that
     /// turns a robust median into a standard deviation.
     private static let medianOfHalfNormal = 0.674_489_750_196_081_7
@@ -207,6 +233,22 @@ public struct SyncProbeCorrelator {
         /// to the arrival's own reverb, which reads as evidence against the
         /// very peak it came from.
         public var peakToSidelobe: Double
+        /// The same statement as ``peakToSidelobe``, but measured against the
+        /// background within ``SyncProbeCorrelator/localBackgroundHalfWidthSeconds``
+        /// of the peak instead of the whole tape.
+        ///
+        /// A whole-tape background is dominated by lags nowhere near the peak.
+        /// When the reference is music rather than a sweep, the lags that can
+        /// actually be mistaken for the arrival are its own neighbours — the
+        /// same bar one repeat later — and those are the ones this measures
+        /// against. Infinity when the neighbourhood holds too few lags to
+        /// summarise.
+        public var localScore: Double
+        /// Peak height over the highest rival lag inside the searched range:
+        /// the best lag more than ``SyncProbeCorrelator/peakMarginSeparationSeconds``
+        /// away from this one. 1 means the runner-up matched the winner;
+        /// infinity when there is no positive rival at all.
+        public var peakMargin: Double
     }
 
     /// Two arrivals from one recording, reduced to the number the sync engine
@@ -247,14 +289,27 @@ public struct SyncProbeCorrelator {
     /// deliberately: a window a few hundred lags wide has no honest background
     /// of its own, and scoring a peak against its own immediate neighbourhood
     /// is how a matched filter flatters itself.
-    func arrival(inCorrelation corr: [Float], searchCount: Int, lags: Range<Int>) -> Arrival? {
+    ///
+    /// `claimed` lists lags another search has already taken, and
+    /// `claimRadius` how far around each of them this one must stay away. Both
+    /// the peak search and the runner-up that ``Arrival/peakMargin`` measures
+    /// skip that ground, so a second speaker whose window overlaps the first
+    /// one's can be asked what it hears APART from the arrival already
+    /// accounted for, and is not scored against it either. The background
+    /// estimates still count those lags: a loud arrival 40 ms away really is
+    /// part of what this correlation looks like.
+    func arrival(inCorrelation corr: [Float], searchCount: Int, lags: Range<Int>,
+                 claimed: [Int] = [], claimRadius: Int = 0) -> Arrival? {
         let lo = max(0, lags.lowerBound)
         let hi = min(searchCount, lags.upperBound)
         guard lo < hi, searchCount <= corr.count else { return nil }
+        func isClaimed(_ i: Int) -> Bool {
+            claimed.contains { abs(i - $0) <= claimRadius }
+        }
 
         var peakIndex = lo
         var peakValue = -Float.infinity
-        for i in lo..<hi where corr[i] > peakValue {
+        for i in lo..<hi where corr[i] > peakValue && !isClaimed(i) {
             peakValue = corr[i]
             peakIndex = i
         }
@@ -268,11 +323,34 @@ public struct SyncProbeCorrelator {
             background.append(abs(corr[i]))
         }
         guard background.count > 1 else { return nil }
-        background.sort()
-        let sigma = Double(background[background.count / 2]) / Self.medianOfHalfNormal
-        let sidelobe = (2 * log(Double(background.count))).squareRoot() * sigma
-        let psr = sidelobe > 0 ? Double(peakValue) / sidelobe : .infinity
+        let psr = Self.score(peak: peakValue, background: &background)
         guard psr >= minPeakToSidelobe else { return nil }
+
+        // The same estimate over the lags right around the peak. No reverb
+        // shadow here: a 250 ms shadow inside a ±300 ms neighbourhood would
+        // leave only the lags ahead of the peak, which is a different
+        // measurement, and the harness this number is compared against
+        // excludes the peak symmetrically.
+        let neighbourhood = max(1, Int(localBackgroundHalfWidthSeconds * sampleRate))
+        var localBackground: [Float] = []
+        localBackground.reserveCapacity(2 * neighbourhood)
+        for i in max(0, peakIndex - neighbourhood)..<min(searchCount, peakIndex + neighbourhood)
+        where abs(i - peakIndex) > exclusion {
+            localBackground.append(abs(corr[i]))
+        }
+        let localScore = localBackground.count > 1
+            ? Self.score(peak: peakValue, background: &localBackground) : .infinity
+
+        // The strongest lag that is not this arrival. Whether it is a rival
+        // reading of the same sound or the music's next repeat, a peak the
+        // runner-up nearly matches is a coin toss the caller should not act on.
+        let separation = max(1, Int(peakMarginSeparationSeconds * sampleRate))
+        var runnerUp = -Float.infinity
+        for i in lo..<hi
+        where abs(i - peakIndex) > separation && corr[i] > runnerUp && !isClaimed(i) {
+            runnerUp = corr[i]
+        }
+        let margin = runnerUp > 0 ? Double(peakValue) / Double(runnerUp) : .infinity
 
         // Parabola through the peak and its neighbours: the sweep's main lobe
         // spans several samples (≈ sampleRate / bandwidth), so three points
@@ -287,7 +365,17 @@ public struct SyncProbeCorrelator {
                 offset += 0.5 * (cm - cp) / denom
             }
         }
-        return Arrival(sampleOffset: offset, peakToSidelobe: psr)
+        return Arrival(sampleOffset: offset, peakToSidelobe: psr,
+                       localScore: localScore, peakMargin: margin)
+    }
+
+    /// Peak height over the largest value this many lags of background are
+    /// EXPECTED to reach. Sorts in place, so the caller's array is consumed.
+    private static func score(peak: Float, background: inout [Float]) -> Double {
+        background.sort()
+        let sigma = Double(background[background.count / 2]) / medianOfHalfNormal
+        let sidelobe = (2 * log(Double(background.count))).squareRoot() * sigma
+        return sidelobe > 0 ? Double(peak) / sidelobe : .infinity
     }
 
     /// The one-shot calibration read: both probes located in one recording,
@@ -320,8 +408,43 @@ public struct SyncProbeCorrelator {
     /// The failure is unreachable on macOS and reachable on a phone: a 15 s
     /// tape at 48 kHz asks for n = 2^20, each call transiently holds ~46 MB,
     /// and under iOS memory pressure the allocation can be declined.
+    ///
+    /// `whiteningExponent` divides each bin by the probe's own magnitude
+    /// spectrum raised to that power: 0 leaves the plain matched filter
+    /// untouched, 1 is the phase transform (the probe is known exactly, so
+    /// dividing by its magnitude leaves phase only). Values between the two
+    /// whiten partially. Every chirp caller stays at 0 — see the type note for
+    /// why the calibration path does not want this — and only the passive
+    /// drift path, where the reference is music rather than a sweep, passes a
+    /// non-zero value.
     static func correlate(recording: [Float], probe: [Float],
-                          ambientNoise: [Float]?) -> [Float]? {
+                          ambientNoise: [Float]?,
+                          whiteningExponent: Double = 0) -> [Float]? {
+        correlations(recording: recording, probe: probe, ambientNoise: ambientNoise,
+                     whiteningExponent: whiteningExponent,
+                     bandEdgesHz: [], sampleRate: 0)?.full
+    }
+
+    /// ``correlate(recording:probe:ambientNoise:whiteningExponent:)`` plus one
+    /// correlation per frequency band, all from the same pair of forward
+    /// transforms.
+    ///
+    /// A band's correlation is that same cross-spectrum with the bins outside
+    /// the band set to zero, inverse-transformed. Masking a spectrum already
+    /// computed costs one inverse transform per band and shifts no phase, so a
+    /// band's peak sits at the lag that band would have produced had its two
+    /// time signals been filtered and correlated on their own. Filtering the
+    /// signals again per band would cost four more forward transforms for the
+    /// same answer.
+    ///
+    /// `bandEdgesHz` are the edges, rising, so four bands are five numbers.
+    /// Empty (the default) asks for no bands and does exactly the work of
+    /// ``correlate(recording:probe:ambientNoise:whiteningExponent:)``.
+    static func correlations(recording: [Float], probe: [Float],
+                             ambientNoise: [Float]?,
+                             whiteningExponent: Double = 0,
+                             bandEdgesHz: [Double], sampleRate: Double)
+        -> (full: [Float], bands: [[Float]])? {
         let n = fftLength(for: recording.count + probe.count)
         guard let forward = vDSP.DFT(count: n, direction: .forward,
                                      transformType: .complexComplex, ofType: Float.self),
@@ -350,6 +473,15 @@ public struct SyncProbeCorrelator {
             crossIm[k] = recIm[k] * probeRe[k] - recRe[k] * probeIm[k]
         }
 
+        if whiteningExponent > 0 {
+            let weight = whiteningWeights(probeReal: probeRe, probeImaginary: probeIm,
+                                          exponent: whiteningExponent)
+            for k in 0..<n {
+                crossRe[k] *= weight[k]
+                crossIm[k] *= weight[k]
+            }
+        }
+
         if let ambientNoise, !ambientNoise.isEmpty {
             let weight = noiseWeights(ambient: ambientNoise, fftLength: n, forward: forward)
             for k in 0..<n {
@@ -364,7 +496,31 @@ public struct SyncProbeCorrelator {
                           outputReal: &corrRe, outputImaginary: &corrIm)
         let scale = 1 / Float(n)
         for k in 0..<n { corrRe[k] *= scale }
-        return corrRe
+
+        var bands: [[Float]] = []
+        if bandEdgesHz.count > 1, sampleRate > 0 {
+            bands.reserveCapacity(bandEdgesHz.count - 1)
+            for (low, high) in zip(bandEdgesHz, bandEdgesHz.dropFirst()) {
+                var bandRe = crossRe
+                var bandIm = crossIm
+                // A real signal's spectrum is symmetric, so bin k and bin n-k
+                // are the same frequency and have to be masked together.
+                for k in 0..<n {
+                    let hz = Double(min(k, n - k)) * sampleRate / Double(n)
+                    if hz < low || hz >= high {
+                        bandRe[k] = 0
+                        bandIm[k] = 0
+                    }
+                }
+                var bandCorrRe = [Float](repeating: 0, count: n)
+                var bandCorrIm = [Float](repeating: 0, count: n)
+                inverse.transform(inputReal: bandRe, inputImaginary: bandIm,
+                                  outputReal: &bandCorrRe, outputImaginary: &bandCorrIm)
+                for k in 0..<n { bandCorrRe[k] *= scale }
+                bands.append(bandCorrRe)
+            }
+        }
+        return (corrRe, bands)
     }
 
     /// Per-bin `1 / (noisePower + ε)` from a probe-free ambient slice: the
@@ -396,6 +552,38 @@ public struct SyncProbeCorrelator {
         let epsilon = max(mean * 0.05, .leastNormalMagnitude)
         var weights = [Float](repeating: 0, count: n)
         for k in 0..<n { weights[k] = 1 / (smoothed[k] + epsilon) }
+        return weights
+    }
+
+    /// Per-bin `1 / (probePower + ε)^(exponent/2)`: the probe's own magnitude
+    /// spectrum raised to `exponent`, inverted, so bands where the probe is
+    /// loud stop out-voting bands where it is quiet.
+    ///
+    /// Music is the reason this exists. A sweep's magnitude is flat across its
+    /// band, so whitening it changes nothing worth having; a pop mix's power
+    /// sits in the bass, which repeats every 5–25 ms, and the treble that
+    /// actually resolves timing sits near the microphone's floor. Whitening
+    /// levels the two, at the cost of giving quiet bands — where the room's
+    /// noise is all there is — a full vote. The exponent sets how far to go.
+    ///
+    /// The floor is 5% of the probe's mean power, the same shape and the same
+    /// fraction as ``noiseWeights``, so a near-empty bin divides by the floor
+    /// instead of by nothing. No smoothing here: unlike the ambient slice,
+    /// this spectrum is the exact known reference, not an estimate from one
+    /// noisy periodogram.
+    private static func whiteningWeights(probeReal re: [Float], probeImaginary im: [Float],
+                                         exponent: Double) -> [Float] {
+        let n = re.count
+        var power = [Float](repeating: 0, count: n)
+        var total = 0.0
+        for k in 0..<n {
+            power[k] = re[k] * re[k] + im[k] * im[k]
+            total += Double(power[k])
+        }
+        let epsilon = max(Float(total / Double(n)) * 0.05, .leastNormalMagnitude)
+        let half = Float(exponent / 2)
+        var weights = [Float](repeating: 0, count: n)
+        for k in 0..<n { weights[k] = 1 / powf(power[k] + epsilon, half) }
         return weights
     }
 

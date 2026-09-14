@@ -1,0 +1,35 @@
+# Labels for the 2026-09-13 windows (live test 3), which were dumped before the
+# recording runbook started writing a labels.txt beside each block. Findings
+# they come from: .scratch/passive-drift-tracking/HANDOFF.md in the Mac repo,
+# "Live test 3 (2026-09-13, 21:04-21:16 UTC)".
+#
+# <stamp>  <label>  [trueDelayMs]
+2026-09-13T21-07-33Z  good
+2026-09-13T21-10-33Z  noise
+2026-09-13T21-13-33Z  good
+2026-09-13T21-16-33Z  good
+
+# Labels for the 2026-09-14 windows (live test 4). That dump directory DOES
+# carry a labels.txt, but it names recording blocks ("3-good-v85"), and a
+# fixture's label is what the correlator is being asked about, not which block
+# it came from. So the twelve windows the tracked set keeps were copied into a
+# directory with this file as its labels.txt and converted from there.
+#
+# Blocks 3 to 6 and block 8 play music at volume 85 with no trim change: good.
+# Block 7 ran with exactly +40 ms of trim added to the first speaker and the
+# second untouched, so its windows hold two arrivals about 55 ms apart where
+# the good blocks hold two about 16 ms apart.
+#
+# Blocks 1 and 2 are not here: before 08:42 UTC the sender dropped an audio
+# cycle every ~40 s without padding it, which moved every speaker early, so
+# those windows measure a fault that no longer exists. The first window of
+# every block is silence (the block starts before the music does) and is
+# refused as referenceTooQuiet, so none of those are here either.
+2026-09-14T08-45-08Z  good
+2026-09-14T08-51-08Z  good
+2026-09-14T09-36-08Z  good
+2026-09-14T09-45-55Z  jump+40
+2026-09-14T09-51-55Z  jump+40
+2026-09-14T09-54-55Z  jump+40
+2026-09-14T10-01-16Z  good
+2026-09-14T10-07-16Z  good
