@@ -1,0 +1,10 @@
+# Labels for the 2026-09-13 windows (live test 3), which were dumped before the
+# recording runbook started writing a labels.txt beside each block. Findings
+# they come from: .scratch/passive-drift-tracking/HANDOFF.md in the Mac repo,
+# "Live test 3 (2026-09-13, 21:04-21:16 UTC)".
+#
+# <stamp>  <label>  [trueDelayMs]
+2026-09-13T21-07-33Z  good
+2026-09-13T21-10-33Z  noise
+2026-09-13T21-13-33Z  good
+2026-09-13T21-16-33Z  good
