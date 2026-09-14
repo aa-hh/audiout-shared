@@ -130,11 +130,24 @@ share had to become a repository of its own.
 swift test
 ```
 
-Both suites are pure computation on synthetic input: no hardware, no phone, no
-Mac app. `ProbeKitTests` renders arrivals at analytic fractional delays, so the
-expected answer is exact by construction — it covers sub-sample accuracy, the
-two lanes separating under a 23 dB level imbalance, echoes, hum, and every
-refusal path.
+Both suites are pure computation: no hardware, no phone, no Mac app.
+`ProbeKitTests` renders arrivals at analytic fractional delays, so the expected
+answer is exact by construction — it covers sub-sample accuracy, the two lanes
+separating under a 23 dB level imbalance, echoes, hum, and every refusal path.
+
+`PassiveDriftFixtureTests` is the exception to "synthetic". It replays real
+dumped windows — the mix the Mac sent and what its microphone heard, in
+`Tests/ProbeKitTests/Fixtures` — through `PassiveDriftCorrelator` and prints
+what today's code scores on each. It asserts only that the fixtures load and
+decode. Most of the first four windows are refused, that refusal is the
+finding, and a test that failed on it would have to be deleted before the
+algorithm could be worked on at all. New windows need no code change: re-run
+`tools/make-drift-fixtures.py` over the new dump directory and commit what it
+writes. The tracked set is capped at 5 MB, so roughly a dozen windows.
+
+The Mac repo's `dev/drift-window-analysis.py` reads the same fixtures
+(`--fixtures <dir> --swift <this suite's output>`) and checks its own
+plain-filter score against the Swift one.
 
 Note this repo has none of the Mac repo's hooks, so nothing stops a bare
 `swift` command here and nothing runs these tests for you on commit.
