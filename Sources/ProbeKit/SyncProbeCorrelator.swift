@@ -141,10 +141,17 @@ public enum SyncProbe {
 /// segment (a lead-in slice of the same recording, before the probes start),
 /// correlation bins are divided by the measured noise power spectrum, so a
 /// tonal interferer (a hum, a voice) is discounted instead of being whitened
-/// up to equal vote. PHAT-style whitening is deliberately absent — it throws
-/// away per-band SNR, which is exactly the information a noisy party room
-/// needs (the 2026 TDOA-probing result: trained estimators learn
-/// magnitude-aware weighting and never learn PHAT).
+/// up to equal vote. The chirp path adds no whitening on top of that: a
+/// sweep's magnitude is already flat across its band, so dividing by it buys
+/// nothing and throws away per-band SNR, which is exactly the information a
+/// noisy party room needs (the 2026 TDOA-probing result: trained estimators
+/// learn magnitude-aware weighting and never learn PHAT).
+///
+/// ``correlate(recording:probe:ambientNoise:whiteningExponent:)`` does take a
+/// whitening exponent, defaulted to 0 so every chirp caller keeps the filter
+/// above. ``PassiveDriftCorrelator`` passes a non-zero value because its
+/// reference is music, not a sweep: a pop mix's magnitude is anything but
+/// flat, and its bass repeats often enough to own the correlation background.
 ///
 /// **Confidence is measured against the background's EXPECTED largest lag,
 /// never its observed one.** The observed maximum is one sample out of a
@@ -320,8 +327,18 @@ public struct SyncProbeCorrelator {
     /// The failure is unreachable on macOS and reachable on a phone: a 15 s
     /// tape at 48 kHz asks for n = 2^20, each call transiently holds ~46 MB,
     /// and under iOS memory pressure the allocation can be declined.
+    ///
+    /// `whiteningExponent` divides each bin by the probe's own magnitude
+    /// spectrum raised to that power: 0 leaves the plain matched filter
+    /// untouched, 1 is the phase transform (the probe is known exactly, so
+    /// dividing by its magnitude leaves phase only). Values between the two
+    /// whiten partially. Every chirp caller stays at 0 — see the type note for
+    /// why the calibration path does not want this — and only the passive
+    /// drift path, where the reference is music rather than a sweep, passes a
+    /// non-zero value.
     static func correlate(recording: [Float], probe: [Float],
-                          ambientNoise: [Float]?) -> [Float]? {
+                          ambientNoise: [Float]?,
+                          whiteningExponent: Double = 0) -> [Float]? {
         let n = fftLength(for: recording.count + probe.count)
         guard let forward = vDSP.DFT(count: n, direction: .forward,
                                      transformType: .complexComplex, ofType: Float.self),
@@ -348,6 +365,15 @@ public struct SyncProbeCorrelator {
         for k in 0..<n {
             crossRe[k] = recRe[k] * probeRe[k] + recIm[k] * probeIm[k]
             crossIm[k] = recIm[k] * probeRe[k] - recRe[k] * probeIm[k]
+        }
+
+        if whiteningExponent > 0 {
+            let weight = whiteningWeights(probeReal: probeRe, probeImaginary: probeIm,
+                                          exponent: whiteningExponent)
+            for k in 0..<n {
+                crossRe[k] *= weight[k]
+                crossIm[k] *= weight[k]
+            }
         }
 
         if let ambientNoise, !ambientNoise.isEmpty {
@@ -396,6 +422,38 @@ public struct SyncProbeCorrelator {
         let epsilon = max(mean * 0.05, .leastNormalMagnitude)
         var weights = [Float](repeating: 0, count: n)
         for k in 0..<n { weights[k] = 1 / (smoothed[k] + epsilon) }
+        return weights
+    }
+
+    /// Per-bin `1 / (probePower + ε)^(exponent/2)`: the probe's own magnitude
+    /// spectrum raised to `exponent`, inverted, so bands where the probe is
+    /// loud stop out-voting bands where it is quiet.
+    ///
+    /// Music is the reason this exists. A sweep's magnitude is flat across its
+    /// band, so whitening it changes nothing worth having; a pop mix's power
+    /// sits in the bass, which repeats every 5–25 ms, and the treble that
+    /// actually resolves timing sits near the microphone's floor. Whitening
+    /// levels the two, at the cost of giving quiet bands — where the room's
+    /// noise is all there is — a full vote. The exponent sets how far to go.
+    ///
+    /// The floor is 5% of the probe's mean power, the same shape and the same
+    /// fraction as ``noiseWeights``, so a near-empty bin divides by the floor
+    /// instead of by nothing. No smoothing here: unlike the ambient slice,
+    /// this spectrum is the exact known reference, not an estimate from one
+    /// noisy periodogram.
+    private static func whiteningWeights(probeReal re: [Float], probeImaginary im: [Float],
+                                         exponent: Double) -> [Float] {
+        let n = re.count
+        var power = [Float](repeating: 0, count: n)
+        var total = 0.0
+        for k in 0..<n {
+            power[k] = re[k] * re[k] + im[k] * im[k]
+            total += Double(power[k])
+        }
+        let epsilon = max(Float(total / Double(n)) * 0.05, .leastNormalMagnitude)
+        let half = Float(exponent / 2)
+        var weights = [Float](repeating: 0, count: n)
+        for k in 0..<n { weights[k] = 1 / powf(power[k] + epsilon, half) }
         return weights
     }
 

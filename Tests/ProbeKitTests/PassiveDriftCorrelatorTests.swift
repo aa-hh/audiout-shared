@@ -342,4 +342,35 @@ import Testing
 
         #expect(outcome == .unusable(.noConvincingPeak))
     }
+    /// Two speakers a millisecond and a half apart are two arrivals; half a
+    /// millisecond apart they are one. `peakSeparationSeconds` draws that line
+    /// at 1 ms, where a plain matched filter's 5 ms merged a resolved pair
+    /// back into a single reported arrival — and a merged arrival means
+    /// something to the caller: one peak alone in two speakers' windows is how
+    /// it decides those speakers are in sync. Red at the old 5 ms, which
+    /// reports the 1.5 ms pair as one.
+    ///
+    /// The search windows here are narrow, one per arrival, because that is
+    /// the only arrangement in which the two windows pick different lags and
+    /// the separation rule has anything to decide.
+    @Test(arguments: [(gapMs: 1.5, expectedPeaks: 2), (gapMs: 0.5, expectedPeaks: 1)])
+    func separatesArrivalsOverAMillisecondApart(gapMs: Double, expectedPeaks: Int) {
+        let rate = Self.rate
+        let first = 37.4
+        let reference = Self.programSlice(seconds: 1.0, rate: rate)
+        let tape = Self.capture(seconds: 2.0, rate: rate,
+                                arrivals: [(first, 0.5), (first + gapMs, 0.5)], snrDB: 15)
+
+        let outcome = PassiveDriftCorrelator().analyze(
+            reference: reference, referenceRate: rate,
+            capture: tape, captureRate: rate,
+            expectedDelaysMs: [first, first + gapMs], searchHalfWidthMs: gapMs / 2)
+
+        guard case .usable(let peaks) = outcome else {
+            Issue.record("expected the \(gapMs) ms pair to be measurable, got \(outcome)")
+            return
+        }
+        #expect(peaks.count == expectedPeaks)
+    }
+
 }

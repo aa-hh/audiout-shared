@@ -69,8 +69,10 @@ public enum DriftOutcome: Equatable, Sendable {
 /// the probe. Everything else is unchanged: the FFT matched filter, SNR-aware
 /// noise weighting with a plain-filter fallback, parabolic sub-sample peak
 /// interpolation, and the median-floor peak-to-sidelobe score all come from
-/// ``SyncProbeCorrelator``. PHAT whitening stays rejected for the reason stated
-/// there.
+/// ``SyncProbeCorrelator``. One thing does differ: this path whitens the
+/// cross-spectrum partially by the reference's own magnitude
+/// (``whiteningExponent``), which the chirp path does not, because a sweep is
+/// already flat across its band and a pop mix is not.
 ///
 /// **Two things make program audio harder than a sweep, and both are handled
 /// by refusing rather than guessing.** Music is not broadband white — quiet,
@@ -109,11 +111,13 @@ public struct PassiveDriftCorrelator: Sendable {
     /// autocorrelation is an impulse, so its background really is noise and a
     /// true arrival scores in the hundreds. Music correlates with itself at
     /// every lag, so the background this peak is measured against is mostly
-    /// the reference's own structure. On the synthetic broadband scenes in
-    /// `PassiveDriftCorrelatorTests` a true arrival scores 3–6 and a window
-    /// containing no arrival at all scores ~0.9; 3 sits in that gap. The gap
-    /// is narrow, which is why the search window and the suitability checks do
-    /// most of the work and this threshold only catches what they let through.
+    /// the reference's own structure — less so since ``whiteningExponent``
+    /// took some of that structure out. On the synthetic scenes in
+    /// `PassiveDriftCorrelatorTests` a true arrival now scores 3.2–10.9 and a
+    /// window containing no arrival at all scores ~0.8; 3 sits in that gap.
+    /// The gap is narrow, which is why the search window and the suitability
+    /// checks do most of the work and this threshold only catches what they
+    /// let through.
     public var minPeakToSidelobe: Double = 3
 
     /// A reference slice quieter than this (RMS, full scale) is refused. −50
@@ -148,9 +152,46 @@ public struct PassiveDriftCorrelator: Sendable {
     /// Nyquist frequency (half its sample rate).
     public var timingBandHighHz: Double = 8_000
 
+    /// How hard to whiten the cross-spectrum by the reference's own magnitude
+    /// spectrum before the peak search: 0 is the plain matched filter, 1 the
+    /// phase transform, and anything between whitens partially.
+    ///
+    /// 0.7 comes from a sweep of 0, 0.3, 0.5, 0.7 and 1.0 over the four live
+    /// windows captured 2026-09-13 (two Bluetooth speakers, vocal pop at
+    /// normal listening level, Mac built-in microphone). The plain filter
+    /// resolved nothing there: the microphone hears the bass, which repeats
+    /// every ~10 ms, while the treble that carries the timing sits near its
+    /// floor. Whitening raised the true arrival's score — the window with the
+    /// clearest arrival went 2.52 plain, 3.44, 4.21, 5.12, 6.57 — and, more
+    /// to the point, raised it faster than the competing lobes 5 ms away.
+    ///
+    /// 0.7 rather than 1.0 because at 1.0 the second window with a credible
+    /// arrival fell back below the threshold (3.10 at 0.7, 2.85 at 1.0) and a
+    /// window whose three candidate lobes sat within 10% of each other was
+    /// accepted on that 10%. Whitening harder gives bands where the music is
+    /// quiet, and the room's own noise is all there is, a bigger vote; the
+    /// literature says the same, from the other direction — Donohue,
+    /// Hannemann and Dietz (Signal Processing 87(7), 2007) put the best
+    /// exponent near 0.4 for speech in reverberant rooms, and Cobos et al.
+    /// (IEEE/ACM TASLP 2020) find the phase transform optimal only at high
+    /// signal-to-noise ratio, which a living room at 50 dBA is not. A window
+    /// with no arrival in it scored ~1 at every exponent, so nothing here
+    /// buys its score by lifting the background.
+    public var whiteningExponent: Double = 0.7
+
     /// Two candidates closer together than this are the same arrival found by
     /// two overlapping search windows; the weaker is dropped.
-    public var peakSeparationSeconds: Double = 0.005
+    ///
+    /// 1 ms, not the 5 ms this started at, because whitening sharpens the
+    /// lobe to a fraction of a millisecond where the plain filter's was
+    /// milliseconds wide. At 5 ms two arrivals 1.5 ms apart were reported as
+    /// one (`separatesArrivalsOverAMillisecondApart`), and the caller's rule
+    /// for a genuinely merged peak — one peak alone in two speakers' windows
+    /// means those speakers arrived together — needs a merge to mean they
+    /// really did. Two peaks this close are inside the caller's 10 ms
+    /// leave-alone band either way, so splitting them never moves a speaker
+    /// that was already in sync.
+    public var peakSeparationSeconds: Double = 0.001
 
     public init() {}
 
@@ -239,7 +280,8 @@ public struct PassiveDriftCorrelator: Sendable {
         var deciding: [Float] = []
         if let ambientNoise, !ambientNoise.isEmpty,
            let corr = SyncProbeCorrelator.correlate(recording: capture, probe: probe,
-                                                    ambientNoise: ambientNoise),
+                                                    ambientNoise: ambientNoise,
+                                                    whiteningExponent: whiteningExponent),
            corr.count >= searchCount {
             found = peaks(in: corr, searchCount: searchCount, windows: windows,
                           correlator: correlator, rate: captureRate)
@@ -247,7 +289,8 @@ public struct PassiveDriftCorrelator: Sendable {
         }
         if found.isEmpty {
             guard let corr = SyncProbeCorrelator.correlate(recording: capture, probe: probe,
-                                                           ambientNoise: nil),
+                                                           ambientNoise: nil,
+                                                           whiteningExponent: whiteningExponent),
                   corr.count >= searchCount
             else { return (.unusable(.noConvincingPeak), []) }
             found = peaks(in: corr, searchCount: searchCount, windows: windows,
