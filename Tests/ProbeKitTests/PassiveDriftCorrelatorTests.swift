@@ -29,7 +29,7 @@ import Testing
         }
     }
 
-    private static let rate = 24_000.0
+    static let rate = 24_000.0
 
     /// Music-like program: 384 inharmonic lines spread over 200 Hz–9 kHz,
     /// four of them amplitude-modulated at slow rates so the material has a
@@ -55,7 +55,7 @@ import Testing
     /// Each line advances by a fixed phase step per sample (one complex
     /// multiply), so a two-second scene costs a few million multiplies instead
     /// of 20 million `sin` calls.
-    private static func addProgram(to buffer: inout [Double], rate: Double,
+    static func addProgram(to buffer: inout [Double], rate: Double,
                                    delaySeconds: Double, gain: Double) {
         for line in lines {
             let step = 2 * .pi * line.hz / rate
@@ -76,7 +76,7 @@ import Testing
         }
     }
 
-    private static func programSlice(seconds: Double, rate: Double, gain: Double = 1) -> [Float] {
+    static func programSlice(seconds: Double, rate: Double, gain: Double = 1) -> [Float] {
         var buffer = [Double](repeating: 0, count: Int(seconds * rate))
         addProgram(to: &buffer, rate: rate, delaySeconds: 0, gain: gain)
         return buffer.map(Float.init)
@@ -84,7 +84,7 @@ import Testing
 
     /// A capture of one or more speakers playing the same program at given
     /// fractional delays, plus mic noise at `snrDB`.
-    private static func capture(seconds: Double, rate: Double,
+    static func capture(seconds: Double, rate: Double,
                                 arrivals: [(delayMs: Double, gain: Double)],
                                 snrDB: Double, seed: UInt64 = 7,
                                 program: (inout [Double], Double, Double, Double) -> Void
@@ -248,6 +248,37 @@ import Testing
             #expect(abs(candidate.delayMs - 118.2) < 1)
             #expect(candidate.confidence < 50)
         }
+    }
+
+    /// The correlation slice a refused window hands back, so a later stage can
+    /// sum several windows' evidence instead of throwing each one away.
+    ///
+    /// Red if slices come back offset from `firstLagMs` or not one per
+    /// expected delay, so anything summing them adds unrelated lags.
+    @Test func reportsOneCorrelationSlicePerExpectedDelay() {
+        let rate = Self.rate
+        let reference = Self.programSlice(seconds: 1.0, rate: rate)
+        let tape = Self.capture(seconds: 2.0, rate: rate, arrivals: [(118.2, 0.5)], snrDB: 15)
+        var correlator = PassiveDriftCorrelator()
+        correlator.minPeakToSidelobe = 50  // well above what this scene's true arrival scores
+
+        let result = correlator.analyzeWithCandidates(
+            reference: reference, referenceRate: rate,
+            capture: tape, captureRate: rate,
+            expectedDelaysMs: [120], searchHalfWidthMs: 120)
+
+        #expect(result.slices.count == 1)
+        guard let slice = result.slices.first else { return }
+        #expect(slice.firstLagMs == 0)
+        #expect(slice.lagStepMs == 1000 / rate)
+        // The window is centred on 120 ms and reaches 120 ms either side, so
+        // it starts at lag 0 and holds one sample per lag up to 240 ms.
+        #expect(slice.values.count == 2 * Int((0.120 * rate).rounded()) + 1)
+        #expect(slice.bestLagMs.map { abs($0 - 118.2) < 1 } == true)
+
+        let argmax = slice.values.indices.max(by: { slice.values[$0] < slice.values[$1] }) ?? 0
+        let peakLagMs: Double = slice.firstLagMs + Double(argmax) * slice.lagStepMs
+        #expect(abs(peakLagMs - 118.2) < 1)
     }
 
     /// The Mac retains at 44.1 kHz and a microphone commonly captures at

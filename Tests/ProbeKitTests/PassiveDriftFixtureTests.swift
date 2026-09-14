@@ -153,10 +153,11 @@ import Testing
             let reference = try fixture.reference(in: Self.directory)
             let capture = try fixture.capture(in: Self.directory)
             func analyze(_ correlator: PassiveDriftCorrelator) -> (DriftOutcome, [DriftPeak]) {
-                correlator.analyzeWithCandidates(
+                let result = correlator.analyzeWithCandidates(
                     reference: reference, referenceRate: fixture.referenceRate,
                     capture: capture, captureRate: fixture.captureRate,
                     expectedDelaysMs: fixture.expectedDelaysMs, searchHalfWidthMs: 120)
+                return (result.outcome, result.candidates)
             }
 
             let (outcome, candidates) = analyze(correlator)
@@ -248,6 +249,47 @@ import Testing
         #expect(unmoved.count == 4)
         if let low = unmoved.min(), let high = unmoved.max() {
             #expect(high - low <= 2, "the untouched speaker moved: \(unmoved)")
+        }
+    }
+    /// What summing the last few windows' correlation finds in the three
+    /// 2026-09-13 `good` windows, all but one of which today's gates refuse
+    /// one window at a time.
+    ///
+    /// Nothing here asserts an arrival — the same reason as the rest of this
+    /// suite. It prints what the evidence adds up to so a later change can be
+    /// judged against it, and it checks the one structural thing that must
+    /// hold: a slice per baseline, or the windows are not summing what they
+    /// claim to.
+    @Test func summingTheThirteenthsWindowsPrintsWhatTheEvidenceReaches() throws {
+        let correlator = PassiveDriftCorrelator()
+        var accumulator = PassiveDriftAccumulator()
+        var keys: [String] = []
+
+        for fixture in try Self.manifest()
+        where fixture.name.hasPrefix("2026-09-13") && fixture.label == "good" {
+            let reference = try fixture.reference(in: Self.directory)
+            let capture = try fixture.capture(in: Self.directory)
+            let result = correlator.analyzeWithCandidates(
+                reference: reference, referenceRate: fixture.referenceRate,
+                capture: capture, captureRate: fixture.captureRate,
+                expectedDelaysMs: fixture.expectedDelaysMs, searchHalfWidthMs: 120)
+
+            #expect(result.slices.count == fixture.expectedDelaysMs.count,
+                    "\(fixture.name) produced \(result.slices.count) slices, not one per baseline")
+            for (i, slice) in result.slices.enumerated() {
+                let key = "\(i)"
+                accumulator.add(slice, forKey: key)
+                if !keys.contains(key) { keys.append(key) }
+            }
+        }
+
+        for key in keys {
+            if let answer = accumulator.consensus(forKey: key) {
+                print(String(format: "EVIDENCE key=%@ lag=%.2f agreeing=%d/%d",
+                             key, answer.lagMs, answer.agreeingWindows, answer.windowCount))
+            } else {
+                print("EVIDENCE key=\(key) none")
+            }
         }
     }
 }

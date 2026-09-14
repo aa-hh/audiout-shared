@@ -52,6 +52,33 @@ public struct DriftPeak: Equatable, Sendable {
     }
 }
 
+/// One search window's correlation, kept whole so several windows can be
+/// added together later.
+///
+/// A single 4-second window of ordinary music often scores just under the
+/// gates even when the arrival is real. The lags themselves are the evidence,
+/// so ``PassiveDriftAccumulator`` sums these across windows — which only works
+/// if each one says where its first value sits in absolute lag, because two
+/// windows searched around different baselines cover different lag ranges.
+public struct DriftSlice: Equatable, Sendable {
+    /// The correlation values inside this window, one per lag.
+    public var values: [Float]
+    /// The lag `values[0]` stands for, ms from the reference slice's start.
+    public var firstLagMs: Double
+    /// How much lag one step through ``values`` covers, ms.
+    public var lagStepMs: Double
+    /// Where this window's own search put the peak, ms — nil when the window
+    /// held no positive correlation.
+    public var bestLagMs: Double?
+
+    public init(values: [Float], firstLagMs: Double, lagStepMs: Double, bestLagMs: Double?) {
+        self.values = values
+        self.firstLagMs = firstLagMs
+        self.lagStepMs = lagStepMs
+        self.bestLagMs = bestLagMs
+    }
+}
+
 /// Why a reference slice cannot localize an arrival. Each case is a distinct
 /// acoustic reason, kept separate so a caller can log which one keeps firing
 /// rather than "measurement skipped".
@@ -341,19 +368,24 @@ public struct PassiveDriftCorrelator: Sendable {
     /// otherwise). A window with no positive correlation or no room inside the
     /// capture contributes nothing. Empty when the slice was refused before
     /// correlating (quiet, narrowband, periodic, too short).
+    ///
+    /// `slices` is the raw correlation behind those candidates, one per
+    /// expected delay and in the same order, and is what
+    /// ``PassiveDriftAccumulator`` adds up across windows. Empty on the same
+    /// early refusals as `candidates`.
     public func analyzeWithCandidates(reference: [Float], referenceRate: Double,
                                       capture: [Float], captureRate: Double,
                                       expectedDelaysMs: [Double], searchHalfWidthMs: Double,
                                       ambientNoise: [Float]? = nil)
-        -> (outcome: DriftOutcome, candidates: [DriftPeak]) {
+        -> (outcome: DriftOutcome, candidates: [DriftPeak], slices: [DriftSlice]) {
         guard referenceRate > 0, captureRate > 0,
               reference.count > 1, capture.count > 1
-        else { return (.unusable(.slicesTooShort), []) }
+        else { return (.unusable(.slicesTooShort), [], []) }
 
         // Level is judged full-band: −50 dBFS is a statement about the program
         // being there at all; whether its in-band part can carry timing is the
         // bandwidth and periodicity checks' call.
-        guard Self.rms(reference) >= minReferenceRMS else { return (.unusable(.referenceTooQuiet), []) }
+        guard Self.rms(reference) >= minReferenceRMS else { return (.unusable(.referenceTooQuiet), [], []) }
 
         // One identical filter on every signal the matched filter sees. Its
         // phase response shifts reference and capture alike, so it cancels out
@@ -362,10 +394,10 @@ public struct PassiveDriftCorrelator: Sendable {
         let probe = bandLimited(Self.resampled(reference, from: referenceRate, to: captureRate),
                                 rate: captureRate)
         guard probe.count > 1, capture.count >= probe.count else {
-            return (.unusable(.slicesTooShort), [])
+            return (.unusable(.slicesTooShort), [], [])
         }
         if let rejection = suitability(of: probe, rate: captureRate) {
-            return (.unusable(rejection), [])
+            return (.unusable(rejection), [], [])
         }
         let capture = bandLimited(capture, rate: captureRate)
         let ambientNoise = ambientNoise.map { bandLimited($0, rate: captureRate) }
@@ -377,33 +409,49 @@ public struct PassiveDriftCorrelator: Sendable {
         let bandEdges = Self.votingBandEdges(low: timingBandLowHz,
                                              high: min(timingBandHighHz, captureRate / 2))
 
-        func measure(against ambient: [Float]?) -> [Measured]? {
+        func measure(against ambient: [Float]?) -> (measured: [Measured?], full: [Float])? {
             guard let corr = SyncProbeCorrelator.correlations(
                     recording: capture, probe: probe, ambientNoise: ambient,
                     whiteningExponent: whiteningExponent,
                     bandEdgesHz: bandEdges, sampleRate: captureRate),
                   corr.full.count >= searchCount
             else { return nil }
-            return measurements(full: corr.full, bands: corr.bands, searchCount: searchCount,
-                                windows: windows, centres: centres, rate: captureRate)
+            return (measurements(full: corr.full, bands: corr.bands, searchCount: searchCount,
+                                 windows: windows, centres: centres, rate: captureRate),
+                    corr.full)
         }
 
         // Weighting first, plain filter as the fallback — the same order and
         // the same reason as `ProbeAnalyzer.analyze`: weighting is an
         // optimization for stationary noise, and its failure is never the
         // run's.
-        var measured: [Measured] = []
+        var measured: [Measured?] = []
+        var full: [Float] = []
         if let ambientNoise, !ambientNoise.isEmpty, let weighted = measure(against: ambientNoise) {
-            measured = weighted
+            (measured, full) = weighted
         }
-        if !measured.contains(where: { accepts($0.peak) }) {
+        if !measured.contains(where: { $0.map { accepts($0.peak) } ?? false }) {
             guard let plain = measure(against: nil) else {
-                return (.unusable(.noConvincingPeak), [])
+                return (.unusable(.noConvincingPeak), [], [])
             }
-            measured = plain
+            (measured, full) = plain
+        }
+
+        // One slice per expected delay, from whichever correlation decided the
+        // outcome, each labelled with the absolute lag its first value stands
+        // for so windows around different baselines can still be added up.
+        let lagStepMs = 1000 / captureRate
+        let slices = windows.indices.map { i -> DriftSlice in
+            let lo = max(0, windows[i].lowerBound)
+            let hi = min(searchCount, windows[i].upperBound)
+            return DriftSlice(values: lo < hi ? Array(full[lo..<hi]) : [],
+                              firstLagMs: Double(lo) / captureRate * 1000,
+                              lagStepMs: lagStepMs,
+                              bestLagMs: measured[i]?.peak.delayMs)
         }
 
         let found = measured
+            .compactMap { $0 }
             .filter { accepts($0.peak) }
             .map { measurement -> DriftPeak in
                 var peak = measurement.peak
@@ -412,7 +460,8 @@ public struct PassiveDriftCorrelator: Sendable {
             }
             .sorted { $0.confidence > $1.confidence }
         return (found.isEmpty ? .unusable(.noConvincingPeak) : .usable(found),
-                measured.map(\.peak))
+                measured.compactMap { $0?.peak },
+                slices)
     }
 
     // MARK: - internals
@@ -433,8 +482,9 @@ public struct PassiveDriftCorrelator: Sendable {
             && peak.agreeingBands >= minAgreeingBands
     }
 
-    /// One measurement per search window, in the caller's order, scored but
-    /// not judged.
+    /// One entry per search window, in the caller's order, scored but not
+    /// judged — nil where the window held no positive correlation or no room
+    /// inside the capture.
     ///
     /// Two speakers whose search windows overlap would otherwise both report
     /// the loudest arrival in the overlap and the second one would be lost —
@@ -447,7 +497,7 @@ public struct PassiveDriftCorrelator: Sendable {
     /// refusal rather than an invented second arrival.
     private func measurements(full: [Float], bands: [[Float]], searchCount: Int,
                               windows: [Range<Int>], centres: [Int],
-                              rate: Double) -> [Measured] {
+                              rate: Double) -> [Measured?] {
         var scorer = SyncProbeCorrelator(sampleRate: rate)
         // The gates decide, so nothing is dropped before they see it.
         scorer.minPeakToSidelobe = 0
@@ -482,7 +532,7 @@ public struct PassiveDriftCorrelator: Sendable {
         // would otherwise report each of them as narrowly beaten by the other.
         // The bands are asked the same question with the same ground ruled
         // out, or they would all vote for whichever arrival is louder.
-        return windows.indices.compactMap { i -> Measured? in
+        return windows.indices.map { i -> Measured? in
             guard let claim = resolved[i] else { return nil }
             // Only a claim far enough away to count as a rival is ruled out.
             // One inside the keep-out is part of this arrival's own skirt,
