@@ -79,6 +79,14 @@ public enum CompanionCommand: Equatable, Sendable {
     /// then current value, on target + reference.
     case playAlignmentDemo(targetID: String)
 
+    /// Asks the Mac to synthesize the macOS play/pause media key, so whatever
+    /// app currently owns transport responds as if the key were pressed.
+    case transportPlayPause
+    /// Asks the Mac to synthesize the macOS next-track media key.
+    case transportNext
+    /// Asks the Mac to synthesize the macOS previous-track media key.
+    case transportPrevious
+
     /// Sent phone → Mac: carries a licence key bought in the phone app. The
     /// Mac answers with a `commandResult`.
     case activateLicenseKey(key: String)
@@ -114,6 +122,7 @@ extension CompanionCommand: Codable {
         case startAlignmentProbe, cancelAlignmentProbe, reportAlignmentMeasurement
         case setAlignmentTick, nudgeAlignmentTrim, revertAlignmentNudge
         case clearAlignmentTuning, playAlignmentDemo
+        case transportPlayPause, transportNext, transportPrevious
         case activateLicenseKey
     }
 
@@ -189,6 +198,12 @@ extension CompanionCommand: Codable {
             self = .clearAlignmentTuning(targetID: try c.decode(String.self, forKey: .id))
         case .playAlignmentDemo:
             self = .playAlignmentDemo(targetID: try c.decode(String.self, forKey: .id))
+        case .transportPlayPause:
+            self = .transportPlayPause
+        case .transportNext:
+            self = .transportNext
+        case .transportPrevious:
+            self = .transportPrevious
         case .activateLicenseKey:
             self = .activateLicenseKey(key: try c.decode(String.self, forKey: .key))
         }
@@ -289,6 +304,12 @@ extension CompanionCommand: Codable {
         case .playAlignmentDemo(let targetID):
             try c.encode(Name.playAlignmentDemo.rawValue, forKey: .command)
             try c.encode(targetID, forKey: .id)
+        case .transportPlayPause:
+            try c.encode(Name.transportPlayPause.rawValue, forKey: .command)
+        case .transportNext:
+            try c.encode(Name.transportNext.rawValue, forKey: .command)
+        case .transportPrevious:
+            try c.encode(Name.transportPrevious.rawValue, forKey: .command)
         case .activateLicenseKey(let key):
             try c.encode(Name.activateLicenseKey.rawValue, forKey: .command)
             try c.encode(key, forKey: .key)

@@ -69,6 +69,7 @@ import Testing
             addableApps: [Snapshot.AddableApp(bundleID: "com.apple.Podcasts", displayName: "Podcasts")],
             localFallbackActive: false,
             takeoverStatus: "Taking over from another Mac",
+            transportAvailable: true,
             settings: SettingsState(connectVolume: 70, connectVolumeMin: 0, connectVolumeMax: 100, startBufferMs: 200, startBufferOptionsMs: [100, 200, 500])
         )
     }
@@ -207,6 +208,17 @@ import Testing
         let data = try JSONEncoder().encode(snapshot)
         let reloaded = try JSONDecoder().decode(Snapshot.self, from: data)
         #expect(reloaded == snapshot)
+        #expect(reloaded.transportAvailable == true)
+    }
+
+    @Test func snapshotWithoutTransportAvailableKeyDecodesAsNotReported() throws {
+        var snapshot = Self.fullSnapshot()
+        snapshot.transportAvailable = nil
+        let data = try JSONEncoder().encode(snapshot)
+        let json = try #require(String(data: data, encoding: .utf8))
+        #expect(!json.contains("transportAvailable"))
+        let reloaded = try JSONDecoder().decode(Snapshot.self, from: data)
+        #expect(reloaded.transportAvailable == nil)
     }
 
     @Test func deviceStateWithFullAlignmentStateRoundTrips() throws {
@@ -339,6 +351,9 @@ import Testing
         .revertAlignmentNudge(targetID: "device-2"),
         .clearAlignmentTuning(targetID: "device-2"),
         .playAlignmentDemo(targetID: "device-2"),
+        .transportPlayPause,
+        .transportNext,
+        .transportPrevious,
         .activateLicenseKey(key: "AUDT-AAAAA-BBBBB-CCCCC-DDDDD"),
     ])
     func everyCommandCaseRoundTrips(_ command: CompanionCommand) throws {
@@ -451,6 +466,14 @@ import Testing
         """
         let command = try JSONDecoder().decode(CompanionCommand.self, from: Data(json.utf8))
         #expect(command == .activateLicenseKey(key: "AUDT-AAAAA-BBBBB-CCCCC-DDDDD"))
+    }
+
+    @Test func transportPlayPauseCommandDecodesFromAHandWrittenWireLiteral() throws {
+        let json = """
+        {"command":"transportPlayPause"}
+        """
+        let command = try JSONDecoder().decode(CompanionCommand.self, from: Data(json.utf8))
+        #expect(command == .transportPlayPause)
     }
 
     @Test func welcomeDecodesFromAHandWrittenWireLiteral() throws {

@@ -302,6 +302,11 @@ public struct Snapshot: Codable, Equatable, Sendable {
     /// change, no protocol break); `nil` means "not reported" — treat as
     /// `false`.
     public var systemDefaultIsAirPlayActive: Bool?
+    /// Whether the Mac can post media keys — its process is trusted for
+    /// Accessibility. Optional so a peer built before this field decodes
+    /// cleanly (additive change, no protocol break); `nil` means "not
+    /// reported" — treat as `false`.
+    public var transportAvailable: Bool?
     public var settings: SettingsState
 
     public init(
@@ -318,6 +323,7 @@ public struct Snapshot: Codable, Equatable, Sendable {
         localFallbackActive: Bool,
         takeoverStatus: String? = nil,
         systemDefaultIsAirPlayActive: Bool? = nil,
+        transportAvailable: Bool? = nil,
         settings: SettingsState
     ) {
         self.serverName = serverName
@@ -333,6 +339,7 @@ public struct Snapshot: Codable, Equatable, Sendable {
         self.localFallbackActive = localFallbackActive
         self.takeoverStatus = takeoverStatus
         self.systemDefaultIsAirPlayActive = systemDefaultIsAirPlayActive
+        self.transportAvailable = transportAvailable
         self.settings = settings
     }
 }
