@@ -197,3 +197,11 @@ list.
 - `verdict` (`applied`, `firstPass`, `refused`): what the phone did with a
   measurement it just took.
 - `mac_id`: the join key described above.
+- `distribution` (`official`, `source`), Mac only, on every event: whether
+  the copy is a release the owner signed with the Audiout Developer ID team
+  or a copy someone built from the public repository. The token that reaches
+  PostHog is committed in that repository, so source builds report like
+  shipped ones; the Mac decides the value from its own code signature, never
+  from anything in the build. A source build has no licence server and so
+  never appears in a purchase funnel — filter every insight by this property
+  so the two populations do not blend.
