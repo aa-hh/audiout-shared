@@ -42,7 +42,7 @@ itself.
 | `takeover:retry_tapped` | mac | — | — | The main-mix "Speakers unreachable" strip's Try Again button is clicked. |
 | `license:buy_link_opened` | mac | `source` | `mixer_note`, `license_sheet`, `settings`, `gate` | A Buy link is opened, from any of the four places it appears. |
 | `license:removed` | mac | — | — | The user removes their license key from the license sheet. |
-| `license:key_submitted` | mac | `outcome`, `source` (only from the gate) | `outcome`: the verification result — exactly `active`, `revoked`, `unknown`, `invalid`, `unreachable`, `no_server`, `no_key`; `source`: `gate`, `phone` | A pasted or typed license key is submitted, from the settings sheet, the first-run gate, or a key sent by the connected iPhone. |
+| `license:key_submitted` | mac | `outcome`, `source` (only from the gate) | `outcome`: the verification result — exactly `active`, `revoked`, `unknown`, `invalid`, `unreachable`, `no_server`, `no_key`, `already_licensed`; `source`: `gate`, `phone` | A pasted or typed license key is submitted, from the settings sheet, the first-run gate, or a key sent by the connected iPhone. `already_licensed` is the phone's only: the Mac already holds a paid key of its own and keeps it. A phone re-sending the key the Mac already holds active sends no event at all, so one buyer is one submission rather than one per reconnection. |
 | `license:enter_sheet_opened` | mac | — | — | The "Enter a license key" sheet opens from Settings. |
 | `license:gate_shown` | mac | — | — | The first-run license gate window is shown. |
 | `license:trial_started` | mac | — | — | The first-run gate's Start Trial button is clicked. |
