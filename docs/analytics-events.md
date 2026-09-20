@@ -171,6 +171,8 @@ list.
 | `airplay:session_failed` | `state`, `cause`, `wasStreaming` | `state`: `failed`, `passwordRequired`; `cause`: `authRequired`, `droppedMidStream`, `unknown`; `wasStreaming`: `true`, `false` | A live AirPlay session dies while the user still wants that speaker on. |
 | `airplay:connect_failed` | `cause` | `timingUnavailable`, `authRequired`, `timedOut`, `unknown` | An AirPlay speaker fails to connect. |
 | `capture:whole_system_failed` | `kind`, `retrying` | `kind`: `tap_creation_failed`, `aggregate_device_failed`, `format_read_failed`, `device_lost`, `os_unsupported`; `retrying`: `true`, `false` | System audio capture fails while capture is wanted. |
+| `local_playback:start_failed` | `site` | `synced_local`, `app_routes`, `capture_state`, `leveled` | Playing through the Mac's own speakers fails to start (a "play everywhere" selection or a "This Mac"-routed app), so the Mac stays silent while the speakers play. The error text stays local. |
+| `sync:restart_failed` | — | — | The local playback engine fails to restart after the Mac's output device changed or the machine woke, so the Mac stays silent until the next change. The error text stays local. |
 | `settings:save_failed` | `domain`, `code` | `domain`: the Cocoa error domain; `code`: the Cocoa error code | A settings file cannot be written. The error's localised description stays local, because it can carry a file path. |
 | `settings:file_corrupt` | `files` | a comma-joined list of Audiout's own settings file names, never a user path | Unreadable settings files are set aside at launch. |
 | `bt:connect_failed` | `reason` | `timeout`, `no_audio_endpoint`, or a Bluetooth status code as `0x` hex | A Bluetooth speaker fails to connect. |
