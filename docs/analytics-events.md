@@ -40,14 +40,18 @@ itself.
 |---|---|---|---|---|
 | `app:launched` | mac | — | — | The app launches. The one event that carries PostHog's own coarse geoip lookup on the request; no property of its own. |
 | `takeover:retry_tapped` | mac | — | — | The main-mix "Speakers unreachable" strip's Try Again button is clicked. |
-| `license:buy_link_opened` | mac | `source` | `mixer_note`, `license_sheet`, `settings`, `gate` | A Buy link is opened, from any of the four places it appears. |
+| `license:buy_link_opened` | mac | `source` | `note`, `license_sheet`, `settings`, `gate` | A Buy link is opened, from any of the four places it appears. `mixer_note` is the pre-2026-09-26 name of `note`. |
 | `license:removed` | mac | — | — | The user removes their license key from the license sheet. |
 | `license:key_submitted` | mac | `outcome`, `source` (only from the gate) | `outcome`: the verification result — exactly `active`, `revoked`, `unknown`, `invalid`, `unreachable`, `no_server`, `no_key`; `source`: `gate`, `phone` | A pasted or typed license key is submitted, from the settings sheet, the first-run gate, or a key sent by the connected iPhone. |
-| `license:enter_sheet_opened` | mac | — | — | The "Enter a license key" sheet opens from Settings. |
+| `license:enter_sheet_opened` | mac | `source` | `settings`, `note` | The "Enter a license key" sheet opens, from its Settings button or the popover note's "I have a key". |
 | `license:gate_shown` | mac | — | — | The first-run license gate window is shown. |
 | `license:trial_started` | mac | — | — | The first-run gate's Start Trial button is clicked. |
 | `license:banner_shown` | mac | `day` | `3`, `1` | The days-left-in-trial banner is shown, with how many days remain. |
-| `license:expired_gate_shown` | mac | — | — | The gate is shown because the trial or license has expired. |
+| `license:expired_gate_shown` | mac | — | — | Retired 2026-09-26 (stream ends): an unregistered install now runs limited to one speaker instead of showing an expired gate. |
+| `license:limit_hit` | mac | `attempted` | `speaker`, `group`, `sync` | An unregistered install tries something the one-speaker limit refuses: a second speaker, a group, or the sync wizard. |
+| `license:switch_offer_used` | mac | — | — | The row's "Play here instead" offer, raised after a refused second speaker, is clicked. |
+| `license:thank_you_shown` | mac | — | — | The popover's thank-you card is shown to a trial that converted, once per popover open. |
+| `license:thank_you_closed` | mac | — | — | The thank-you card's Close button is clicked. |
 | `license:conversion_consent_opted_in` | mac | — | — | A trial converter accepts the one-time post-purchase usage-statistics ask. Grant-only: there is no matching decline event, since a decline just stops future events. |
 | `license:key_pasted` | mac | `outcome` | `no_key`, `filled` | The Paste button on the license gate is clicked, with whether the clipboard held a usable key. |
 | `license:resend_requested` | mac | — | — | The gate's "Resend" (license email) is requested. |
