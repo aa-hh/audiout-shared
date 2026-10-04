@@ -43,7 +43,8 @@ import Testing
                         failureHeadline: "Couldn't connect",
                         failureSuggestion: "Check the speaker is powered on",
                         failureCause: "authRequired",
-                        credentialKind: "password"
+                        credentialKind: "password",
+                        access: "password"
                     )
                 ),
             ],
@@ -319,6 +320,18 @@ import Testing
         let device = try JSONDecoder().decode(DeviceState.self, from: Data(json.utf8))
         #expect(device.alignment == nil)
         #expect(device.id == "device-1")
+    }
+
+    /// Old-peer compatibility: a `ConnectionInfo` from a Mac that predates
+    /// `access` must still decode, with `access` reading `nil`. Making
+    /// `access` non-optional turns this red.
+    @Test func connectionInfoWithoutAccessKeyDecodes() throws {
+        let json = """
+        {"state": "failed", "failureCause": "authRequired", "credentialKind": "password"}
+        """
+        let connection = try JSONDecoder().decode(DeviceState.ConnectionInfo.self, from: Data(json.utf8))
+        #expect(connection.access == nil)
+        #expect(connection.credentialKind == "password")
     }
 
     // MARK: - Every command case round-trips
