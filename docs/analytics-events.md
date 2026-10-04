@@ -40,7 +40,7 @@ itself.
 |---|---|---|---|---|
 | `app:launched` | mac | — | — | The app launches. The one event that carries PostHog's own coarse geoip lookup on the request; no property of its own. |
 | `takeover:retry_tapped` | mac | — | — | The main-mix "Speakers unreachable" strip's Try Again button is clicked. |
-| `license:buy_link_opened` | mac | `source` | `note`, `license_sheet`, `settings`, `gate` | A Buy link is opened, from any of the four places it appears. `mixer_note` is the pre-2026-09-26 name of `note`. |
+| `license:buy_link_opened` | mac | `source` | `note`, `license_sheet`, `settings`, `gate` | A Buy link is opened, from any of the four places it appears. `mixer_note` is the pre-2026-09-26 name of `note`. `license_sheet` stopped 2026-10-04 (build a10b776f): the Settings licence sheet lost its Buy button. |
 | `license:removed` | mac | — | — | The user removes their license key from the license sheet. |
 | `license:key_submitted` | mac | `outcome`, `source` (only from the gate) | `outcome`: the verification result — exactly `active`, `revoked`, `unknown`, `invalid`, `unreachable`, `no_server`, `no_key`; `source`: `gate`, `phone` | A pasted or typed license key is submitted, from the settings sheet, the first-run gate, or a key sent by the connected iPhone. |
 | `license:enter_sheet_opened` | mac | `source` | `settings`, `note` | The "Enter a license key" sheet opens, from its Settings button or the popover note's "I have a key". |
@@ -53,6 +53,7 @@ itself.
 | `license:thank_you_shown` | mac | — | — | The popover's thank-you card is shown to a trial that converted, once per popover open. |
 | `license:thank_you_closed` | mac | — | — | The thank-you card's Close button is clicked. |
 | `license:conversion_consent_opted_in` | mac | — | — | A trial converter accepts the one-time post-purchase usage-statistics ask. Grant-only: there is no matching decline event, since a decline just stops future events. |
+| `license:launch_clamp_lifted` | mac | `clamped`, `speaker_count` | `clamped`: `speakers`, `scene`; `speaker_count`: the number of speakers in what was stored, as a string | At launch an unregistered install replaced a stored two-or-more-speaker selection or scene with This Mac (spec J5), and the licence answer that same launch then lifted the one-speaker limit; the selection it dropped is not restored. Owner accepted this 2026-10-04 and wants it counted. |
 | `license:key_pasted` | mac | `outcome` | `no_key`, `filled` | The Paste button on the license gate is clicked, with whether the clipboard held a usable key. |
 | `license:resend_requested` | mac | — | — | The gate's "Resend" (license email) is requested. |
 | `mixer:bt_pairing_settings_opened` | mac | — | — | "Pair a Bluetooth speaker" opens macOS's own Bluetooth settings pane. |
