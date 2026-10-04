@@ -41,7 +41,9 @@ import Testing
                     connection: DeviceState.ConnectionInfo(
                         state: "failed",
                         failureHeadline: "Couldn't connect",
-                        failureSuggestion: "Check the speaker is powered on"
+                        failureSuggestion: "Check the speaker is powered on",
+                        failureCause: "authRequired",
+                        credentialKind: "password"
                     )
                 ),
             ],
@@ -355,6 +357,7 @@ import Testing
         .transportNext,
         .transportPrevious,
         .activateLicenseKey(key: "AUDT-AAAAA-BBBBB-CCCCC-DDDDD"),
+        .submitSpeakerPassword(id: "device-2", password: "hunter2"),
     ])
     func everyCommandCaseRoundTrips(_ command: CompanionCommand) throws {
         let data = try JSONEncoder().encode(command)
@@ -466,6 +469,15 @@ import Testing
         """
         let command = try JSONDecoder().decode(CompanionCommand.self, from: Data(json.utf8))
         #expect(command == .activateLicenseKey(key: "AUDT-AAAAA-BBBBB-CCCCC-DDDDD"))
+    }
+
+    // Renaming the `password` coding key or the `submitSpeakerPassword` name turns this red.
+    @Test func submitSpeakerPasswordCommandDecodesFromAHandWrittenWireLiteral() throws {
+        let json = """
+        {"command":"submitSpeakerPassword","id":"d2","password":"hunter2"}
+        """
+        let command = try JSONDecoder().decode(CompanionCommand.self, from: Data(json.utf8))
+        #expect(command == .submitSpeakerPassword(id: "d2", password: "hunter2"))
     }
 
     @Test func transportPlayPauseCommandDecodesFromAHandWrittenWireLiteral() throws {

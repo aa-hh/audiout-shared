@@ -28,11 +28,26 @@ public struct DeviceState: Codable, Equatable, Sendable {
         public var state: String
         public var failureHeadline: String?
         public var failureSuggestion: String?
+        /// The Mac's name for why the connection failed (e.g. `"authRequired"`).
+        /// Present only when `state == "failed"`.
+        public var failureCause: String?
+        /// `"password"` when the Mac has no stored password for a
+        /// password-protected speaker; `"pin"` is reserved for on-screen code
+        /// pairing. Absent otherwise, in any state.
+        public var credentialKind: String?
 
-        public init(state: String, failureHeadline: String? = nil, failureSuggestion: String? = nil) {
+        public init(
+            state: String,
+            failureHeadline: String? = nil,
+            failureSuggestion: String? = nil,
+            failureCause: String? = nil,
+            credentialKind: String? = nil
+        ) {
             self.state = state
             self.failureHeadline = failureHeadline
             self.failureSuggestion = failureSuggestion
+            self.failureCause = failureCause
+            self.credentialKind = credentialKind
         }
     }
 
