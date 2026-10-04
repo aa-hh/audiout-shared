@@ -91,6 +91,11 @@ public enum CompanionCommand: Equatable, Sendable {
     /// Mac answers with a `commandResult`.
     case activateLicenseKey(key: String)
 
+    /// Sent phone → Mac: the AirPlay password the user typed for speaker `id`.
+    /// The Mac stores it, retries the speaker and answers `commandResult`;
+    /// whether it worked arrives in the next snapshot's `ConnectionInfo`.
+    case submitSpeakerPassword(id: String, password: String)
+
     /// An unrecognized `"command"` string — e.g. a newer phone talking to an
     /// older Mac. Decodes without throwing so the server can answer with a
     /// failed `commandResult` instead of dropping the connection.
@@ -111,6 +116,7 @@ extension CompanionCommand: Codable {
         case active
         case deltaMs
         case key
+        case password
     }
 
     private enum Name: String {
@@ -124,6 +130,7 @@ extension CompanionCommand: Codable {
         case clearAlignmentTuning, playAlignmentDemo
         case transportPlayPause, transportNext, transportPrevious
         case activateLicenseKey
+        case submitSpeakerPassword
     }
 
     public init(from decoder: Decoder) throws {
@@ -206,6 +213,11 @@ extension CompanionCommand: Codable {
             self = .transportPrevious
         case .activateLicenseKey:
             self = .activateLicenseKey(key: try c.decode(String.self, forKey: .key))
+        case .submitSpeakerPassword:
+            self = .submitSpeakerPassword(
+                id: try c.decode(String.self, forKey: .id),
+                password: try c.decode(String.self, forKey: .password)
+            )
         }
     }
 
@@ -313,6 +325,10 @@ extension CompanionCommand: Codable {
         case .activateLicenseKey(let key):
             try c.encode(Name.activateLicenseKey.rawValue, forKey: .command)
             try c.encode(key, forKey: .key)
+        case .submitSpeakerPassword(let id, let password):
+            try c.encode(Name.submitSpeakerPassword.rawValue, forKey: .command)
+            try c.encode(id, forKey: .id)
+            try c.encode(password, forKey: .password)
         case .unknown(let name):
             // Round-trips as whatever it decoded from — re-encoding an
             // `.unknown` just forwards the original unrecognized name with
