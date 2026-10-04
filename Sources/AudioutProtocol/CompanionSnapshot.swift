@@ -35,19 +35,25 @@ public struct DeviceState: Codable, Equatable, Sendable {
         /// password-protected speaker; `"pin"` is reserved for on-screen code
         /// pairing. Absent otherwise, in any state.
         public var credentialKind: String?
+        /// How the speaker gates senders, as the Mac reads it from Bonjour:
+        /// `open`, `password`, `onScreenCode`, `homeMembersOnly`. Absent from
+        /// an older Mac. Present in every state.
+        public var access: String?
 
         public init(
             state: String,
             failureHeadline: String? = nil,
             failureSuggestion: String? = nil,
             failureCause: String? = nil,
-            credentialKind: String? = nil
+            credentialKind: String? = nil,
+            access: String? = nil
         ) {
             self.state = state
             self.failureHeadline = failureHeadline
             self.failureSuggestion = failureSuggestion
             self.failureCause = failureCause
             self.credentialKind = credentialKind
+            self.access = access
         }
     }
 
