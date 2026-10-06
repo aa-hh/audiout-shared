@@ -51,8 +51,8 @@ fi
 [ -f "$(git rev-parse --git-dir 2>/dev/null)/MERGE_HEAD" ] && exit 0
 
 hits=""
-for f in $(git diff --cached --name-only --diff-filter=AM -- 'Tests/' | grep -E '\.swift$'); do
-    out=$(git diff --cached -U0 -- "$f" | awk '
+for f in $(git diff --cached --no-renames --name-only --diff-filter=AM -- 'Tests/' | grep -E '\.swift$'); do
+    out=$(git diff --cached --no-renames -U0 -- "$f" | awk '
         /^@@/ { s = $3; sub(/^\+/, "", s); split(s, p, ","); n = p[1] + 0; next }
         /^\+\+\+/ { next }
         /^\+/ { print n ":" substr($0, 2); n++ }' \
