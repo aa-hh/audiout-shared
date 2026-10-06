@@ -72,6 +72,7 @@ itself.
 | `settings:excluded_app_added` | mac | — | — | An app is added to the per-app exclusion list in Settings. |
 | `settings:reconnect_at_launch_toggled` | mac | `enabled` | `true`, `false` | The "reconnect speakers at launch" switch is toggled. |
 | `settings:launch_at_login_toggled` | mac | `enabled` | `true`, `false` | The "launch at login" switch is toggled (fires on the attempted state, whether or not macOS honors it). |
+| `speaker:privacy_settings_opened` | mac | `access` | `local_network` | The Speakers overview's "Local Network access is off" row's Open Privacy Settings… button opens macOS's Privacy & Security ▸ Local Network pane. |
 | `surface:shown` | mac | `screen` | the screen shown (mixer, scenes, and so on) | The app's popover or window is shown after being hidden. |
 | `surface:screen_selected` | mac | `screen` | `mixer`, `groups` (the Scenes screen; the value name is unchanged on purpose), `speakers`, `settings` | The user switches tabs/screens inside the app's surface. |
 | `surface:pin_toggled` | mac | `pinned` | `true`, `false` | The popover's pin (keep open) control is toggled. |
