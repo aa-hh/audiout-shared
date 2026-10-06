@@ -42,7 +42,7 @@ itself.
 | `takeover:retry_tapped` | mac | — | — | The main-mix "Speakers unreachable" strip's Try Again button is clicked. |
 | `license:buy_link_opened` | mac | `source` | `note`, `license_sheet`, `settings`, `gate` | A Buy link is opened, from any of the four places it appears. `mixer_note` is the pre-2026-09-26 name of `note`. `license_sheet` stopped 2026-10-04 (build a10b776f): the Settings licence sheet lost its Buy button. |
 | `license:removed` | mac | — | — | The user removes their license key from the license sheet. |
-| `license:key_submitted` | mac | `outcome`, `source` (only from the gate) | `outcome`: the verification result — exactly `active`, `revoked`, `unknown`, `invalid`, `unreachable`, `no_server`, `no_key`; `source`: `gate`, `phone` | A pasted or typed license key is submitted, from the settings sheet, the first-run gate, or a key sent by the connected iPhone. |
+| `license:key_submitted` | mac | `outcome`, `source` (from the gate or a connected iPhone; absent from the settings sheet) | `outcome`: the verification result — exactly `active`, `revoked`, `unknown`, `invalid`, `unreachable`, `no_server`, `no_key`; `source`: `gate`, `phone` | A pasted or typed license key is submitted, from the settings sheet, the first-run gate, or a key sent by the connected iPhone. |
 | `license:enter_sheet_opened` | mac | `source` | `settings`, `note` | The "Enter a license key" sheet opens, from its Settings button or the popover note's "I have a key". |
 | `license:gate_shown` | mac | — | — | The first-run license gate window is shown. |
 | `license:trial_started` | mac | — | — | The first-run gate's Start Trial button is clicked. |
@@ -193,6 +193,7 @@ list.
 | `settings:save_failed` | `domain`, `code` | `domain`: the Cocoa error domain; `code`: the Cocoa error code | A settings file cannot be written. The error's localised description stays local, because it can carry a file path. |
 | `settings:file_corrupt` | `files` | a comma-joined list of Audiout's own settings file names, never a user path | Unreadable settings files are set aside at launch. |
 | `bt:connect_failed` | `reason` | `timeout`, `no_audio_endpoint`, or a Bluetooth status code as `0x` hex | A Bluetooth speaker fails to connect. |
+| `bt_sink:dead` | `reason` | `device_gone`, `device_gone_at_start`, `render_stalled` | A Bluetooth speaker's sink found its device gone or its render callback stalled and tore itself down. |
 | `bt_volume:hardware_write_failed` | — | — | Setting a Bluetooth speaker's own volume fails, so that speaker's slider goes back to scaling the sound on the Mac for the rest of the session. The speaker id stays local. |
 | `bt_volume:store_write_failed` | — | — | The "Control speaker volume" choices cannot be saved to disk. The choice still holds for the session. The error text stays local, because it can carry a file path. |
 
