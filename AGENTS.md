@@ -169,8 +169,12 @@ compares the same signal this suite does. If that exponent or the band edges
 move here, they have to move there too or the comparison silently stops being
 one.
 
-Note this repo has none of the Mac repo's hooks, so nothing stops a bare
-`swift` command here and nothing runs these tests for you on commit.
+Turn on the pre-commit hook once per clone: `git config core.hooksPath .githooks`.
+It runs `tools/check-test-waits.sh`, which refuses a newly added real-time wait
+(`Task.sleep`, `asyncAfter`, a short timeout literal) in a staged `Tests/` file.
+Tests drive an injected clock, never the wall clock; a trailing
+`// real-time-ok: <reason>` exempts a line. Nothing else runs on commit, and
+nothing stops a bare `swift` command here; run `swift test` yourself.
 
 ## Releasing
 

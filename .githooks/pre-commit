@@ -1,0 +1,2 @@
+#!/bin/sh
+exec bash "$(git rev-parse --show-toplevel)/tools/check-test-waits.sh"
