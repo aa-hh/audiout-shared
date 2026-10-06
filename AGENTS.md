@@ -9,11 +9,12 @@ nothing else. Three products in one package:
   phone speak: Bonjour constants (`CompanionProto`), the JSON envelope
   (`CompanionEnvelope`/`CompanionMessage`), the command set
   (`CompanionCommand`), and the state snapshot types (`Snapshot` and friends).
-- **`ProbeKit`** — the speaker sync-measurement DSP. A DOWN sweep
-  (2000→500 Hz) on the reference lane and an UP sweep (3200→10000 Hz) on the
-  target lane play at one scheduled moment; one microphone hears both, so
-  capture latency and the shared start cancel in the arrival DIFFERENCE. This
-  package synthesises the sweeps and recovers that difference.
+- **`ProbeKit`** — the speaker sync-measurement DSP. One glide template
+  plays on both speakers in turn, the Bluetooth (target) speaker first and the
+  reference a fixed spacing later, from one scheduled start; the timing lives
+  in `SyncProbe.Layout`. One microphone hears both, so capture latency and the
+  shared start cancel in the arrival DIFFERENCE. This package synthesises the
+  probe and recovers that difference.
 - **`AudioutField`** — the brand's emitter-field constants (emitter positions,
   motion, and each scene's colour ramp), as data only. See its own section
   below.
@@ -36,8 +37,9 @@ share had to become a repository of its own.
   guard that blocks that copy; this is the path that's supposed to win
   instead. For a new wire field, a protocol case, or a ProbeKit tweak:
   1. Edit it here, not in a consumer repo.
-  2. `swift test` (see Tests below).
-  3. Tag and push: `git tag X.Y.Z && git push origin main --tags`. Whether
+  2. `swift test` (see Tests below), then land it through a pull request
+     (see Workflow below).
+  3. Once it has merged, tag it (see Releasing below). Whether
      that also bumps `CompanionProto.version` is the AudioutProtocol rule
      above — additive cases don't, semantic changes do.
   4. Bump the pin in **both** consumers in the same session — a protocol
@@ -82,21 +84,21 @@ share had to become a repository of its own.
 
 - **This is the single home of `SyncProbeCorrelator.swift`.** It used to be
   hand-copied into the phone's own package. The copy is gone and must not come
-  back: the Mac stages the sweeps this file describes, so a divergence between
+  back: the Mac stages the probe this file describes, so a divergence between
   the two ends is not a local bug — it is a measurement of the wrong signal,
   reported as a confident number.
-- **`ProbeAnalyzer.sweepSeconds` (1.0) IS still a hand-copy**, of
-  `AlignmentTickInjector.probeSweepSeconds` in the Mac app. The dependency runs
-  one way only — this package may never import `AudioutCore` — so those two
-  constants move together by hand or not at all.
-- **The lane assignment is the Mac's choice, not this package's.** DOWN is the
-  reference lane, UP the target. Swapping the labels here reverses the sign of
-  every measurement, and nothing fails loudly when it happens.
-- **The caller reports the raw measurement; the Mac owns trim semantics.**
-  `offsetMs` is positive when the target sounded LATE. No sign convention or
-  trim arithmetic belongs in here.
-- **Refuse rather than guess.** A capture shorter than one sweep throws
-  `recordingTooShort`; a sweep not found convincingly throws `probeNotFound`.
+- **The earlier arrival is the target, the later the reference.** The Mac
+  stages them in that order; reading them the other way round reverses the
+  sign of every measurement, and nothing fails loudly when it happens.
+- **The package removes its own lane spacing; the Mac owns trim semantics.**
+  `offsetMs` is the skew left after subtracting `Layout.laneSpacingSeconds`,
+  positive when the target sounded LATE. No trim arithmetic belongs in here.
+- **Ambient smoothing is 100 Hz on the probe path and 64 bins on the drift
+  path.** A probe recording runs to several seconds, so 64 bins would average
+  only a few hertz of the noise spectrum. The drift path keeps 64 bins because
+  its fixture tests assert real-capture outcomes made with that width.
+- **Refuse rather than guess.** A capture shorter than the whole probe throws
+  `recordingTooShort`; a lane not found convincingly throws `probeNotFound`.
   There is no best-effort answer — the caller falls back to asking the user by
   ear, and a wrong number is worse than none because nobody learns it was
   invented.
@@ -169,15 +171,56 @@ compares the same signal this suite does. If that exponent or the band edges
 move here, they have to move there too or the comparison silently stops being
 one.
 
-Note this repo has none of the Mac repo's hooks, so nothing stops a bare
-`swift` command here and nothing runs these tests for you on commit.
+Turn on the pre-commit hook once per clone: `git config core.hooksPath .githooks`.
+It refuses, in order: a commit on `main`; an added Swift comment line matching
+the near-certain slop patterns in `docs/REVIEW-RUBRIC.md` (trailing `slop-ok`
+exempts); in a staged `Tests/` file, a new `@Test` without a comment sentence
+naming the change that turns it red, an added `print(` (`print-ok` exempts), or
+a new file holding one test (`new-suite-ok` exempts); and, through
+`tools/check-test-waits.sh`, a newly added real-time wait (`Task.sleep`,
+`asyncAfter`, a short timeout literal) in a staged `Tests/` file. Tests drive an
+injected clock, never the wall clock; a trailing `// real-time-ok: <reason>`
+exempts a line. Tests do not run on commit: GitHub's `tests` workflow runs
+`swift test` on every pull request, so run it yourself before you push.
+
+## Workflow
+
+- **`main` accepts only pull requests.** Never commit or push to `main`
+  (the pre-commit hook refuses a commit there). Never edit the main checkout;
+  if you find uncommitted edits in it, stop and ask, they belong to another
+  session.
+- **Work in a worktree, and push its branch at once:**
+  ```bash
+  git fetch origin
+  git worktree add worktrees/<slug> -b claude/<slug> origin/main
+  cd worktrees/<slug>
+  git push -u origin claude/<slug>
+  ```
+- **When the work is done:**
+  ```bash
+  git push -u origin HEAD
+  gh pr create --fill
+  bash scripts/review-branch.sh   # run the passes it prints as subagents, then: bash scripts/review-branch.sh --continue
+  ```
+  Then stop and ask the owner before merging. Only after a clear yes, run
+  `gh pr merge --merge --auto`, which merges once both checks are green:
+  `tests` (`swift test` on GitHub) and `review` (the commit status `--continue`
+  posts, with one PR comment listing the findings). Only a HIGH finding fails
+  `review`: fix it, commit, push, and run the script again, which reviews only
+  the fix; a third run refuses. Run the script after every push: a push that
+  leaves the branch's own non-Markdown lines unchanged re-posts the last
+  round's status without using a round. Any change to
+  `Sources/AudioutProtocol/`, `Sources/ProbeKit/` or `Package.swift` gets the
+  full four-reviewer pass whatever its size. `bash scripts/test-review-branch.sh`
+  tests the review script itself.
 
 ## Releasing
 
-Both apps pin a version, so a change is not real to them until it is tagged:
+Both apps pin a version, so a change is not real to them until it is tagged.
+Tag after the pull request merges, from `origin/main`, never from a branch:
 
 ```
-git tag 0.2.0 && git push --tags
+git fetch origin && git tag 0.2.0 origin/main && git push origin 0.2.0
 ```
 
 A protocol break needs both apps updated and shipped together — tag it, raise

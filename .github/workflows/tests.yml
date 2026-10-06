@@ -1,0 +1,32 @@
+name: Tests
+
+# `swift test` on a GitHub-hosted Mac, once per pull request and once per push
+# to main. macOS, not Linux: ProbeKit imports Accelerate. No path filter on
+# purpose: a required check that does not run leaves the PR stuck at
+# "expected".
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+jobs:
+  tests:
+    name: tests
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: swift test

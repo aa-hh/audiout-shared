@@ -17,7 +17,7 @@ One AirPlay, Bluetooth, or Chromecast output the Mac can play to.
 _Avoid_: Device, output, endpoint (in user-facing copy)
 
 **Measurement**:
-One run of the sync probe: the Mac plays both sweeps, the iPhone's microphone hears them, and the arrival difference becomes that speaker's offset.
+One run of the sync probe: the Mac plays the same glide on each speaker in turn, the iPhone's microphone hears both, and the arrival difference becomes that speaker's offset.
 _Avoid_: Calibration, probe (user-facing), alignment run
 
 **Offset**:
@@ -45,5 +45,5 @@ The phone app running against a pretend Mac with six pretend speakers, for a rev
 _Avoid_: Sandbox, preview, sample mode, mock
 
 **Align by ear**:
-The Mac-only fallback that finds an offset from the user's answers to paired clicks, with no microphone.
-_Avoid_: Wizard, calibration
+Setting an offset by listening instead of measuring. On the Mac it is the fallback that finds the offset from the user's answers to paired clicks, with no microphone. On the phone it is the page where the user nudges the offset while the Mac plays clicks through both speakers. Either way the result is an offset whose source is by ear.
+_Avoid_: Wizard, calibration, fine tune, adjust by ear
