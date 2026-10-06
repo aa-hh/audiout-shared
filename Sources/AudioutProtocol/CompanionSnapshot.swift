@@ -139,6 +139,21 @@ public struct DeviceState: Codable, Equatable, Sendable {
     /// so a peer built before this field decodes cleanly (additive change,
     /// no protocol break); `nil` means "not reported".
     public var alignment: AlignmentState?
+    /// The Mac's "Show in Mixer" choice for this speaker: `"whenAvailable"`,
+    /// `"always"` or `"hideWhenNotInUse"` (the Mac's
+    /// `SpeakerMixerVisibility.rawValue`). Optional so a peer built before
+    /// this field decodes cleanly (additive change, no protocol break); `nil`
+    /// means an older Mac, and a phone shows no visibility control.
+    public var mixerVisibility: String?
+    /// Whether the Mac's Mixer lists this speaker right now: true for This Mac
+    /// and any speaker in use, whatever its `mixerVisibility`. `nil` means an
+    /// older Mac; a phone treats it as listed.
+    public var isVisibleInMixer: Bool?
+    /// Whether the Mac is sending audio frames to this speaker right now
+    /// (session open, speaker not muted, Main Audio not muted, the engine
+    /// streaming). `nil` means an older Mac; a phone then shows the speaker as
+    /// connected only, never playing.
+    public var isPlaying: Bool?
 
     public init(
         id: String,
@@ -153,7 +168,10 @@ public struct DeviceState: Codable, Equatable, Sendable {
         isSelected: Bool,
         isMainOutMember: Bool,
         connection: ConnectionInfo,
-        alignment: AlignmentState? = nil
+        alignment: AlignmentState? = nil,
+        mixerVisibility: String? = nil,
+        isVisibleInMixer: Bool? = nil,
+        isPlaying: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -168,6 +186,36 @@ public struct DeviceState: Codable, Equatable, Sendable {
         self.isMainOutMember = isMainOutMember
         self.connection = connection
         self.alignment = alignment
+        self.mixerVisibility = mixerVisibility
+        self.isVisibleInMixer = isVisibleInMixer
+        self.isPlaying = isPlaying
+    }
+}
+
+/// A speaker the Mac remembers but cannot find right now (not This Mac, no
+/// live device).
+public struct MissingSpeakerState: Codable, Equatable, Sendable {
+    public var id: String
+    public var name: String
+    /// `Device.Kind.rawValue`; `nil` when the Mac doesn't know it.
+    public var kind: String?
+
+    public init(id: String, name: String, kind: String? = nil) {
+        self.id = id
+        self.name = name
+        self.kind = kind
+    }
+}
+
+/// The Mac's note slot: the one Mac-wide note currently shown.
+public struct NoteState: Codable, Equatable, Sendable {
+    public var text: String
+    /// `"info"` or `"warning"`.
+    public var severity: String
+
+    public init(text: String, severity: String) {
+        self.text = text
+        self.severity = severity
     }
 }
 
@@ -328,6 +376,18 @@ public struct Snapshot: Codable, Equatable, Sendable {
     /// cleanly (additive change, no protocol break); `nil` means "not
     /// reported" — treat as `false`.
     public var transportAvailable: Bool?
+    /// The speakers the Mac remembers but cannot find right now (not This Mac,
+    /// no live device). Optional so a peer built before this field decodes
+    /// cleanly (additive change, no protocol break); absent from an older Mac.
+    /// A phone offers Forget only for these.
+    public var missingSpeakers: [MissingSpeakerState]?
+    /// The Mac's note slot: the one highest-precedence Mac-wide note among
+    /// capture-failed, routing-blocked, Speaker Sync takeover and double path;
+    /// never a licence or trial note. When present the phone draws this
+    /// instead of deriving a strip from `takeoverStatus` /
+    /// `systemDefaultIsAirPlayActive`. `nil` from an older Mac, which keeps
+    /// sending those two.
+    public var note: NoteState?
     public var settings: SettingsState
 
     public init(
@@ -345,6 +405,8 @@ public struct Snapshot: Codable, Equatable, Sendable {
         takeoverStatus: String? = nil,
         systemDefaultIsAirPlayActive: Bool? = nil,
         transportAvailable: Bool? = nil,
+        missingSpeakers: [MissingSpeakerState]? = nil,
+        note: NoteState? = nil,
         settings: SettingsState
     ) {
         self.serverName = serverName
@@ -361,6 +423,8 @@ public struct Snapshot: Codable, Equatable, Sendable {
         self.takeoverStatus = takeoverStatus
         self.systemDefaultIsAirPlayActive = systemDefaultIsAirPlayActive
         self.transportAvailable = transportAvailable
+        self.missingSpeakers = missingSpeakers
+        self.note = note
         self.settings = settings
     }
 }
