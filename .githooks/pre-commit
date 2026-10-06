@@ -1,2 +1,48 @@
 #!/bin/sh
-exec bash "$(git rev-parse --show-toplevel)/tools/check-test-waits.sh"
+# Every guard here refuses with exit 1; the first refusal stops the commit.
+# Tests do not run here: GitHub runs `swift test` on every pull request.
+#
+# Enable with:  git config core.hooksPath .githooks
+# Disable with: git config --unset core.hooksPath
+# Override once: git commit --no-verify
+
+hook_dir=$(dirname "$0")
+top=$(git rev-parse --show-toplevel) || exit 1
+
+# ---------------------------------------------------------------------------
+# GUARD 1: no direct commits onto main.
+#
+# Main takes changes only through a pull request. Loose edits in a shared
+# checkout are a trap for the next agent through: committing them looks
+# helpful, and it is how the Mac repo's f1f3e94 put a feature's docs on main
+# with none of its code.
+branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+if [ "$branch" = "main" ]; then
+    echo "" >&2
+    echo "  REFUSED: direct commit to main." >&2
+    echo "" >&2
+    echo "  Work in a worktree and land it through a pull request, so docs and" >&2
+    echo "  code travel together. See Workflow in AGENTS.md." >&2
+    echo "" >&2
+    echo "  If these are someone else's uncommitted edits and they are in your" >&2
+    echo "  way: STOP and ask. Do not commit work you did not write." >&2
+    echo "" >&2
+    echo "  Really meant it?  git commit --no-verify" >&2
+    echo "" >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# GUARD 7: added Swift comment lines must pass the readability screen
+# (docs/REVIEW-RUBRIC.md). The code review itself runs on the pull request
+# (scripts/review-branch.sh).
+sh "$hook_dir/guard-self-review.sh" || exit 1
+
+# ---------------------------------------------------------------------------
+# GUARD 11: a new @Test names the change that turns it red, no print( in
+# tests, no new file holding a single test.
+sh "$hook_dir/guard-test-discipline.sh" || exit 1
+
+# ---------------------------------------------------------------------------
+# No newly added real-time wait in a staged Tests/ file.
+exec bash "$top/tools/check-test-waits.sh"
