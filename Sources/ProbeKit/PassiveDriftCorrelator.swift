@@ -413,7 +413,8 @@ public struct PassiveDriftCorrelator: Sendable {
             guard let corr = SyncProbeCorrelator.correlations(
                     recording: capture, probe: probe, ambientNoise: ambient,
                     whiteningExponent: whiteningExponent,
-                    bandEdgesHz: bandEdges, sampleRate: captureRate),
+                    bandEdgesHz: bandEdges, sampleRate: captureRate,
+                    ambientSmoothingHz: nil),
                   corr.full.count >= searchCount
             else { return nil }
             return (measurements(full: corr.full, bands: corr.bands, searchCount: searchCount,
@@ -584,7 +585,7 @@ public struct PassiveDriftCorrelator: Sendable {
     /// Nil when the band-limited slice can carry a timing measurement.
     private func suitability(of reference: [Float], rate: Double) -> DriftRejection? {
         guard let selfCorr = SyncProbeCorrelator.correlate(recording: reference, probe: reference,
-                                                           ambientNoise: nil),
+                                                           ambientNoise: nil, sampleRate: rate),
               !selfCorr.isEmpty, selfCorr[0] > 0
         else { return .slicesTooShort }
 

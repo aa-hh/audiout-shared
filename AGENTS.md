@@ -9,11 +9,12 @@ nothing else. Three products in one package:
   phone speak: Bonjour constants (`CompanionProto`), the JSON envelope
   (`CompanionEnvelope`/`CompanionMessage`), the command set
   (`CompanionCommand`), and the state snapshot types (`Snapshot` and friends).
-- **`ProbeKit`** — the speaker sync-measurement DSP. A DOWN sweep
-  (2000→500 Hz) on the reference lane and an UP sweep (3200→10000 Hz) on the
-  target lane play at one scheduled moment; one microphone hears both, so
-  capture latency and the shared start cancel in the arrival DIFFERENCE. This
-  package synthesises the sweeps and recovers that difference.
+- **`ProbeKit`** — the speaker sync-measurement DSP. One glide template
+  plays on both speakers in turn, the Bluetooth (target) speaker first and the
+  reference a fixed spacing later, from one scheduled start; the timing lives
+  in `SyncProbe.Layout`. One microphone hears both, so capture latency and the
+  shared start cancel in the arrival DIFFERENCE. This package synthesises the
+  probe and recovers that difference.
 - **`AudioutField`** — the brand's emitter-field constants (emitter positions,
   motion, and each scene's colour ramp), as data only. See its own section
   below.
@@ -82,21 +83,21 @@ share had to become a repository of its own.
 
 - **This is the single home of `SyncProbeCorrelator.swift`.** It used to be
   hand-copied into the phone's own package. The copy is gone and must not come
-  back: the Mac stages the sweeps this file describes, so a divergence between
+  back: the Mac stages the probe this file describes, so a divergence between
   the two ends is not a local bug — it is a measurement of the wrong signal,
   reported as a confident number.
-- **`ProbeAnalyzer.sweepSeconds` (1.0) IS still a hand-copy**, of
-  `AlignmentTickInjector.probeSweepSeconds` in the Mac app. The dependency runs
-  one way only — this package may never import `AudioutCore` — so those two
-  constants move together by hand or not at all.
-- **The lane assignment is the Mac's choice, not this package's.** DOWN is the
-  reference lane, UP the target. Swapping the labels here reverses the sign of
-  every measurement, and nothing fails loudly when it happens.
-- **The caller reports the raw measurement; the Mac owns trim semantics.**
-  `offsetMs` is positive when the target sounded LATE. No sign convention or
-  trim arithmetic belongs in here.
-- **Refuse rather than guess.** A capture shorter than one sweep throws
-  `recordingTooShort`; a sweep not found convincingly throws `probeNotFound`.
+- **The earlier arrival is the target, the later the reference.** The Mac
+  stages them in that order; reading them the other way round reverses the
+  sign of every measurement, and nothing fails loudly when it happens.
+- **The package removes its own lane spacing; the Mac owns trim semantics.**
+  `offsetMs` is the skew left after subtracting `Layout.laneSpacingSeconds`,
+  positive when the target sounded LATE. No trim arithmetic belongs in here.
+- **Ambient smoothing is 100 Hz on the probe path and 64 bins on the drift
+  path.** A probe recording runs to several seconds, so 64 bins would average
+  only a few hertz of the noise spectrum. The drift path keeps 64 bins because
+  its fixture tests assert real-capture outcomes made with that width.
+- **Refuse rather than guess.** A capture shorter than the whole probe throws
+  `recordingTooShort`; a lane not found convincingly throws `probeNotFound`.
   There is no best-effort answer — the caller falls back to asking the user by
   ear, and a wrong number is worse than none because nobody learns it was
   invented.

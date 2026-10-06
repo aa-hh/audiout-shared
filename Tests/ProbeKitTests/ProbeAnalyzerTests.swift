@@ -7,14 +7,15 @@ import Foundation
 import Testing
 @testable import ProbeKit
 
-/// The phone-side reduction of a probe capture to one number: does it recover
-/// a known offset at the sample rates a phone actually hands us, does it keep
-/// the sign the Mac expects, and does it refuse rather than guess.
+/// The reduction of a probe capture to one number: does it recover a known
+/// offset at the sample rates a phone actually hands us, does it keep the
+/// sign the Mac expects, and does it refuse rather than guess.
 ///
-/// Every scene here uses the SHIPPING sweep designs — the ones the Mac stages —
-/// rather than the small fast sweeps `SyncProbeCorrelatorTests` uses to
-/// exercise the filter itself. That is the point of this suite: it tests the
-/// contract with the Mac, not the mathematics.
+/// Every scene here uses the SHIPPING probe — the glide over its drone, on
+/// both speakers in turn, as the Mac stages it — rather than the small fast
+/// sweeps `SyncProbeCorrelatorTests` uses to exercise the filter itself. That
+/// is the point of this suite: it tests the contract with the Mac, not the
+/// mathematics.
 @Suite struct ProbeAnalyzerTests {
 
     /// SplitMix64 — a seed pins a whole synthetic scene, so a failure is
@@ -32,32 +33,52 @@ import Testing
     }
 
     /// Phones hand us 48 kHz most of the time and 44.1 kHz sometimes; nothing
-    /// in the analyzer may assume either. 24 kHz keeps most scenes cheap while
-    /// still clearing the 10 kHz top of the high band.
-    private static let rate = 24_000.0
-    private static let sweep = ProbeAnalyzer.sweepSeconds
+    /// in the analyzer may assume either. 8 kHz keeps most scenes cheap while
+    /// still clearing the glide's 3.6 kHz top.
+    private static let rate = 8_000.0
+    private static let spacing = SyncProbe.Layout.laneSpacingSeconds
 
-    /// A capture with the reference (DOWN) and target (UP) sweeps landing at
-    /// given fractional delays, over optional noise and hum.
+    /// A capture with the reference lane landing at `referenceDelay` samples
+    /// and the target lane one staged spacing earlier, `skew` samples late on
+    /// top of that, over optional noise and hum. `drone: false` drops the bed
+    /// from both lanes; `parallelGlide` adds a second glide a fifth below the
+    /// template (2/3 of its frequencies, same shape, equal RMS) to each lane.
     private func renderCapture(sampleRate: Double,
                                referenceDelay: Double,
-                               targetDelay: Double,
+                               skew: Double,
                                referenceGain: Double = 0.5,
                                targetGain: Double = 0.5,
-                               seconds: Double = 3,
+                               seconds: Double = 10,
                                noiseRMS: Double = 0,
                                humHz: Double = 0,
                                humAmplitude: Double = 0,
+                               drone: Bool = true,
+                               parallelGlide: Bool = false,
                                seed: UInt64 = 11) -> [Float] {
-        let down = SyncProbe.SweepDesign.downSweep(sampleRate: sampleRate, duration: Self.sweep)
-        let up = SyncProbe.SweepDesign.upSweep(sampleRate: sampleRate, duration: Self.sweep)
+        let glide = SyncProbe.GlideDesign.probe(sampleRate: sampleRate)
+        var fifthBelow = glide
+        fifthBelow.startHz = glide.startHz * 2 / 3
+        fifthBelow.endHz = glide.endHz * 2 / 3
+        func rms(_ x: [Float]) -> Double {
+            (x.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(x.count)).squareRoot()
+        }
+        let fifthGain = parallelGlide
+            ? rms(SyncProbe.samples(glide)) / rms(SyncProbe.samples(fifthBelow)) : 0
+        let droneGain = drone ? SyncProbe.Drone.gain(sampleRate: sampleRate) : 0
+        let lead = SyncProbe.Layout.bedLeadSeconds
+        func lane(_ t: Double) -> Double {
+            droneGain * SyncProbe.Drone.value(at: t)
+                + SyncProbe.value(glide, at: t - lead)
+                + fifthGain * SyncProbe.value(fifthBelow, at: t - lead)
+        }
+        let targetDelay = referenceDelay - Self.spacing * sampleRate + skew
         var rng = SeededRNG(seed: seed)
         let length = Int(seconds * sampleRate)
         var out = [Float](repeating: 0, count: length)
         for i in 0..<length {
             var sample = 0.0
-            sample += referenceGain * SyncProbe.value(down, at: (Double(i) - referenceDelay) / sampleRate)
-            sample += targetGain * SyncProbe.value(up, at: (Double(i) - targetDelay) / sampleRate)
+            sample += referenceGain * lane((Double(i) - referenceDelay) / sampleRate)
+            sample += targetGain * lane((Double(i) - targetDelay) / sampleRate)
             if noiseRMS > 0 {
                 // Box–Muller: one Gaussian per sample.
                 let u1 = Double.random(in: 1e-12..<1, using: &rng)
@@ -72,14 +93,17 @@ import Testing
         return out
     }
 
+    /// The reference lane's start in the usual scene: the target lane starts
+    /// 1 s into the capture.
+    private static let referenceDelay = rate * (1.0 + spacing)
+
     // MARK: the measurement
 
     @Test func aKnownOffsetIsRecoveredInMilliseconds() throws {
-        // Target 20 ms later than the reference.
-        let lead = Self.rate * 0.5
+        // Target 20 ms later than its staged slot.
         let capture = renderCapture(sampleRate: Self.rate,
-                                    referenceDelay: lead,
-                                    targetDelay: lead + Self.rate * 0.020)
+                                    referenceDelay: Self.referenceDelay,
+                                    skew: Self.rate * 0.020)
         let analysis = try ProbeAnalyzer(sampleRate: Self.rate).analyze(recording: capture)
         #expect(abs(analysis.offsetMs - 20) < 0.5,
                 "a 20 ms lag must read as 20 ms: got \(analysis.offsetMs)")
@@ -88,57 +112,51 @@ import Testing
     }
 
     @Test func theSignSaysTheTargetSoundedLate() throws {
-        let lead = Self.rate * 0.5
         let late = try ProbeAnalyzer(sampleRate: Self.rate)
             .analyze(recording: renderCapture(sampleRate: Self.rate,
-                                              referenceDelay: lead,
-                                              targetDelay: lead + Self.rate * 0.015))
+                                              referenceDelay: Self.referenceDelay,
+                                              skew: Self.rate * 0.015))
         let early = try ProbeAnalyzer(sampleRate: Self.rate)
             .analyze(recording: renderCapture(sampleRate: Self.rate,
-                                              referenceDelay: lead,
-                                              targetDelay: lead - Self.rate * 0.015))
-        #expect(late.offsetMs > 0, "target after reference is POSITIVE — the Mac's convention")
-        #expect(early.offsetMs < 0, "target before reference is negative")
+                                              referenceDelay: Self.referenceDelay,
+                                              skew: -Self.rate * 0.015))
+        #expect(late.offsetMs > 0, "target after its slot is POSITIVE — the Mac's convention")
+        #expect(early.offsetMs < 0, "target before its slot is negative")
         #expect(abs(late.offsetMs + early.offsetMs) < 0.5, "and the two are symmetric")
     }
 
     @Test func fortyFourPointOneKilohertzMeasuresTheSameOffset() throws {
         let rate = 44_100.0
-        let lead = rate * 0.5
         let analysis = try ProbeAnalyzer(sampleRate: rate)
             .analyze(recording: renderCapture(sampleRate: rate,
-                                              referenceDelay: lead,
-                                              targetDelay: lead + rate * 0.020,
-                                              seconds: 2.5))
+                                              referenceDelay: rate * (1.0 + Self.spacing),
+                                              skew: rate * 0.020))
         #expect(abs(analysis.offsetMs - 20) < 0.5,
                 "the rate is a parameter, not an assumption: got \(analysis.offsetMs)")
     }
 
-    /// The property that made disjoint bands worth the trouble: the phone sits
-    /// somewhere, and "somewhere" is rarely equidistant.
+    /// The phone sits somewhere, and "somewhere" is rarely equidistant.
     @Test func aQuietTargetIsFoundBesideALoudReference() throws {
-        let lead = Self.rate * 0.5
         let capture = renderCapture(sampleRate: Self.rate,
-                                    referenceDelay: lead,
-                                    targetDelay: lead + Self.rate * 0.030,
+                                    referenceDelay: Self.referenceDelay,
+                                    skew: Self.rate * 0.030,
                                     referenceGain: 0.7,
                                     targetGain: 0.05,   // ~23 dB down
                                     noiseRMS: 0.002)
         let analysis = try ProbeAnalyzer(sampleRate: Self.rate).analyze(recording: capture)
         #expect(abs(analysis.offsetMs - 30) < 1.0,
-                "the quiet lane shares no bins with the loud one: got \(analysis.offsetMs)")
+                "the quiet lane is searched apart from the loud one: got \(analysis.offsetMs)")
     }
 
     @Test func aHumIsSurvivedWhenTheAmbientLeadInIsSupplied() throws {
-        // Probes start at 1 s, so everything before that is provably probe-free.
-        let lead = Self.rate * 1.0
+        // The target lane starts at 1 s, so everything before that is
+        // provably probe-free. The hum sits inside the glide's band.
         let capture = renderCapture(sampleRate: Self.rate,
-                                    referenceDelay: lead,
-                                    targetDelay: lead + Self.rate * 0.012,
+                                    referenceDelay: Self.referenceDelay,
+                                    skew: Self.rate * 0.012,
                                     referenceGain: 0.25,
                                     targetGain: 0.25,
-                                    seconds: 3.5,
-                                    humHz: 700,
+                                    humHz: 400,
                                     humAmplitude: 0.5)
         let analysis = try ProbeAnalyzer(sampleRate: Self.rate)
             .analyze(recording: capture, ambientEndSample: Int(Self.rate * 0.9))
@@ -149,21 +167,55 @@ import Testing
     /// A lead-in too short to describe the room must not be handed to the
     /// weighting — it falls through to the plain matched filter instead.
     @Test func aUselessAmbientSliceStillMeasures() throws {
-        let lead = Self.rate * 0.5
         let capture = renderCapture(sampleRate: Self.rate,
-                                    referenceDelay: lead,
-                                    targetDelay: lead + Self.rate * 0.020)
+                                    referenceDelay: Self.referenceDelay,
+                                    skew: Self.rate * 0.020)
         let analysis = try ProbeAnalyzer(sampleRate: Self.rate)
             .analyze(recording: capture, ambientEndSample: Int(Self.rate * 0.1))
         #expect(abs(analysis.offsetMs - 20) < 0.5,
                 "below the ambient floor the unweighted pass decides: got \(analysis.offsetMs)")
     }
 
+    /// Red if a change to `SyncProbe.Drone` puts a rival peak within 6 dB of
+    /// either lane's arrival or moves the measured offset.
+    @Test func theDroneCreatesNoRivalPeak() throws {
+        func measure(drone: Bool) throws -> ProbeAnalysis {
+            try ProbeAnalyzer(sampleRate: Self.rate)
+                .analyze(recording: renderCapture(sampleRate: Self.rate,
+                                                  referenceDelay: Self.referenceDelay,
+                                                  skew: Self.rate * 0.0175,
+                                                  noiseRMS: 0.01,
+                                                  drone: drone))
+        }
+        let bare = try measure(drone: false)
+        let bedded = try measure(drone: true)
+        #expect(bedded.peakMargin >= 1.995,
+                "a held chord matches no moment of a moving glide: margin \(bedded.peakMargin)")
+        #expect(abs(bedded.offsetMs - bare.offsetMs) < 0.1,
+                "and moves nothing: \(bedded.offsetMs) against \(bare.offsetMs)")
+    }
+
+    /// Red if the template goes back to a narrow low glide: there a glide a
+    /// fifth below matched the template about a second early nearly as well
+    /// as the real arrival. Across 3.6 kHz → 150 Hz the same decoration only
+    /// overlaps part of the template, so the reading must not move.
+    @Test func aParallelGlideAFifthBelowDoesNotMoveTheReading() throws {
+        let analysis = try ProbeAnalyzer(sampleRate: Self.rate)
+            .analyze(recording: renderCapture(sampleRate: Self.rate,
+                                              referenceDelay: Self.referenceDelay,
+                                              skew: Self.rate * 0.010,
+                                              parallelGlide: true))
+        #expect(abs(analysis.offsetMs - 10) < 0.1,
+                "a glide a fifth below leaves the 10 ms skew alone: got \(analysis.offsetMs) ms")
+        #expect(analysis.peakMargin >= 1.995,
+                "and clears the apps' 6 dB rival guard: margin \(analysis.peakMargin)")
+    }
+
     // MARK: refusal
 
     @Test func pureNoiseIsRefused() {
         var rng = SeededRNG(seed: 99)
-        let noise = (0..<Int(Self.rate * 3)).map { _ -> Float in
+        let noise = (0..<Int(Self.rate * 10)).map { _ -> Float in
             let u1 = Double.random(in: 1e-12..<1, using: &rng)
             let u2 = Double.random(in: 0..<1, using: &rng)
             return Float(0.1 * sqrt(-2 * log(u1)) * cos(2 * .pi * u2))
@@ -177,16 +229,17 @@ import Testing
     /// arrivals, and half of one is not "best effort".
     @Test func aCaptureMissingTheTargetLaneIsRefused() {
         let capture = renderCapture(sampleRate: Self.rate,
-                                    referenceDelay: Self.rate * 0.5,
-                                    targetDelay: 0,
+                                    referenceDelay: Self.referenceDelay,
+                                    skew: 0,
                                     targetGain: 0)
         #expect(throws: ProbeAnalysisError.probeNotFound) {
             _ = try ProbeAnalyzer(sampleRate: Self.rate).analyze(recording: capture)
         }
     }
 
-    @Test func aCaptureShorterThanOneSweepIsRefused() {
-        let short = [Float](repeating: 0, count: Int(Self.rate * 0.5))
+    @Test func aCaptureShorterThanTheWholeProbeIsRefused() {
+        let short = [Float](repeating: 0,
+                            count: Int(Self.rate * SyncProbe.Layout.totalSeconds) - 1)
         #expect(throws: ProbeAnalysisError.recordingTooShort) {
             _ = try ProbeAnalyzer(sampleRate: Self.rate).analyze(recording: short)
         }
@@ -194,23 +247,22 @@ import Testing
 
     // MARK: the contract with the Mac
 
-    /// `AlignmentTickInjector.probeSweepSeconds` is 1.0 and this analyzer
-    /// renders its references at `ProbeAnalyzer.sweepSeconds`. They are two
-    /// copies of one constant; this pins ours so a drift is a red test rather
-    /// than a confidently wrong number in the field.
-    @Test func theSweepLengthMatchesTheMacsStagedProbe() {
-        #expect(ProbeAnalyzer.sweepSeconds == 1.0,
-                "hand-copy of AlignmentTickInjector.probeSweepSeconds")
+    /// The Mac stages the lanes at these times and this analyzer removes the
+    /// spacing itself, so a change here moves both apps at once. Red if a
+    /// layout number moves without the Mac and the phone moving with it.
+    @Test func theLaneLayoutIsPinned() {
+        #expect(SyncProbe.Layout.laneSpacingSeconds == 4.5)
+        #expect(SyncProbe.Layout.glideSeconds == 3.5)
+        #expect(SyncProbe.Layout.totalSeconds == 8.5)
+        #expect(SyncProbe.Layout.bedLeadSeconds == 0.5)
     }
 
-    /// The lane assignment is not ours to revisit — the Mac decides which
-    /// sweep goes to which fan-out. Reading them the other way round flips
-    /// every sign, so this pins which band belongs to which side.
-    @Test func theReferenceLaneIsTheLowBandAndTheTargetLaneTheHigh() {
-        let down = SyncProbe.SweepDesign.downSweep(sampleRate: Self.rate)
-        let up = SyncProbe.SweepDesign.upSweep(sampleRate: Self.rate)
-        #expect(down.startHz == 2_000 && down.endHz == 500, "reference lane sweeps down")
-        #expect(up.startHz == 3_200 && up.endHz == 10_000, "target lane sweeps up")
-        #expect(down.startHz < up.startHz, "and the bands stay disjoint, with a guard gap")
+    /// Red if the template's band, tilt or partials change: the Mac stages this
+    /// glide and both apps correlate against it.
+    @Test func theTemplateBandIsPinned() {
+        let glide = SyncProbe.GlideDesign.probe(sampleRate: Self.rate)
+        #expect(glide.startHz == 3_600 && glide.endHz == 150, "the glide falls 3.6 kHz → 150 Hz")
+        #expect(glide.tiltDBPerOctave == -4, "the top sits about 18 dB under the bottom")
+        #expect(glide.partialLevels == [1], "one glide, no harmonics")
     }
 }

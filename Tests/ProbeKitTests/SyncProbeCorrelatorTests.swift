@@ -34,7 +34,7 @@ import Testing
     /// A probe landing in the recording at a (possibly fractional) sample
     /// delay, scaled by `gain`.
     private struct PlacedProbe {
-        var design: SyncProbe.SweepDesign
+        var design: SyncProbe.GlideDesign
         var delaySamples: Double
         var gain: Double
     }
@@ -68,15 +68,60 @@ import Testing
         return out
     }
 
-    /// Small, fast scene: 8 kHz clock, 200–3000 Hz sweeps.
+    /// Small, fast scene: 8 kHz clock, 200–3000 Hz single-partial sweeps.
     private static let fastRate = 8_000.0
-    private static func fastUp(duration: Double = 0.5) -> SyncProbe.SweepDesign {
-        SyncProbe.SweepDesign(sampleRate: fastRate, startHz: 200, endHz: 3_000,
-                              duration: duration, fadeDuration: 0.01)
+    private static func fastUp(duration: Double = 0.5) -> SyncProbe.GlideDesign {
+        SyncProbe.GlideDesign(sampleRate: fastRate, startHz: 200, endHz: 3_000,
+                              duration: duration, partialLevels: [1],
+                              fadeInSeconds: 0.01, fadeOutSeconds: 0.01)
     }
-    private static func fastDown(duration: Double = 0.5) -> SyncProbe.SweepDesign {
-        SyncProbe.SweepDesign(sampleRate: fastRate, startHz: 3_000, endHz: 200,
-                              duration: duration, fadeDuration: 0.01)
+    private static func fastDown(duration: Double = 0.5) -> SyncProbe.GlideDesign {
+        SyncProbe.GlideDesign(sampleRate: fastRate, startHz: 3_000, endHz: 200,
+                              duration: duration, partialLevels: [1],
+                              fadeInSeconds: 0.01, fadeOutSeconds: 0.01)
+    }
+
+    /// One probe lane placed in a recording: where it starts, in samples,
+    /// and how loud it arrives.
+    private struct PlacedLane {
+        var delaySamples: Double
+        var gain: Double
+    }
+
+    /// A mic recording of shipping probe lanes, each rendered analytically at
+    /// its fractional delay as `SyncProbe.lane` builds it (drone from the
+    /// lane's start, glide from `bedLeadSeconds`), plus optional white noise.
+    private func renderLanes(length: Int, sampleRate: Double, lanes: [PlacedLane],
+                             noiseRMS: Double = 0, seed: UInt64 = 7) -> [Float] {
+        let glide = SyncProbe.GlideDesign.probe(sampleRate: sampleRate)
+        let droneGain = SyncProbe.Drone.gain(sampleRate: sampleRate)
+        let lead = SyncProbe.Layout.bedLeadSeconds
+        var rng = SeededRNG(seed: seed)
+        var out = [Float](repeating: 0, count: length)
+        for i in 0..<length {
+            var sample = 0.0
+            for lane in lanes {
+                let t = (Double(i) - lane.delaySamples) / sampleRate
+                sample += lane.gain * (droneGain * SyncProbe.Drone.value(at: t)
+                                       + SyncProbe.value(glide, at: t - lead))
+            }
+            if noiseRMS > 0 {
+                let u1 = Double.random(in: 1e-12..<1, using: &rng)
+                let u2 = Double.random(in: 0..<1, using: &rng)
+                sample += noiseRMS * sqrt(-2 * log(u1)) * cos(2 * .pi * u2)
+            }
+            out[i] = Float(sample)
+        }
+        return out
+    }
+
+    /// The two lanes' measured skew, ms: later minus earlier, less the
+    /// staged spacing.
+    private static func skewMs(_ lanes: (earlier: SyncProbeCorrelator.Arrival,
+                                         later: SyncProbeCorrelator.Arrival),
+                               rate: Double) -> Double {
+        ((lanes.later.sampleOffset - lanes.earlier.sampleOffset) / rate
+            - SyncProbe.Layout.laneSpacingSeconds) * 1000
     }
 
     // MARK: synthesis
@@ -182,93 +227,98 @@ import Testing
                               ],
                               noiseRMS: 0.02)
         let correlator = SyncProbeCorrelator(sampleRate: Self.fastRate)
-        let m = try #require(correlator.relativeOffset(probeA: up, probeB: down,
-                                                       recording: rec))
+        let a = try #require(correlator.arrival(of: up, in: rec))
+        let b = try #require(correlator.arrival(of: down, in: rec))
+        let offsetSeconds = (b.sampleOffset - a.sampleOffset) / Self.fastRate
         let expected = (733.9 - 400.4) / Self.fastRate
-        #expect(abs(m.offsetSeconds - expected) < 0.5 / Self.fastRate,
-                "the arrival difference is the measurement: got \(m.offsetSeconds * 1000) ms, wanted \(expected * 1000) ms")
-        #expect(m.offsetSeconds > 0, "B arriving later reads positive by contract")
+        #expect(abs(offsetSeconds - expected) < 0.5 / Self.fastRate,
+                "the arrival difference is the measurement: got \(offsetSeconds * 1000) ms, wanted \(expected * 1000) ms")
+        #expect(offsetSeconds > 0, "B arriving later reads positive")
     }
 
-    @Test func fullRateSceneDeliversWellUnderAMillisecond() throws {
-        // The realistic calibration: 44.1 kHz, one-second production probes,
-        // heavy white noise (probes ~13 dB below the noise per-sample), plus
-        // a room echo on each arrival. Processing gain must carry it.
-        let rate = 44_100.0
-        let upDesign = SyncProbe.SweepDesign.upSweep(sampleRate: rate)
-        let downDesign = SyncProbe.SweepDesign.downSweep(sampleRate: rate)
-        let up = SyncProbe.samples(upDesign)
-        let down = SyncProbe.samples(downDesign)
-        let delayUp = 7_938.25    // 180.0 ms
-        let delayDown = 8_269.0   // 187.5 ms → true Δ exactly 7.5 ms
-        let rec = renderScene(length: 66_150, sampleRate: rate,
-                              probes: [
-                                PlacedProbe(design: upDesign, delaySamples: delayUp, gain: 0.05),
-                                PlacedProbe(design: upDesign, delaySamples: delayUp + 620, gain: 0.02),
-                                PlacedProbe(design: downDesign, delaySamples: delayDown, gain: 0.05),
-                                PlacedProbe(design: downDesign, delaySamples: delayDown + 400, gain: 0.02),
-                              ],
-                              noiseRMS: 0.15)
+    /// Red if `laneArrivals` stops searching the second lane at the staged
+    /// spacing, or loses the sub-sample peak on either lane.
+    @Test func twoLanesInTurnDeliverTheSkewUnderNoiseAndEchoes() throws {
+        // The Mac-side geometry: its own speaker 11 dB louder at the mic than
+        // the Bluetooth one across the room, each with a room echo, under
+        // white noise above the quiet lane per sample (white is harsher on
+        // the glide's darkened top than a real room's falling floor). Target first, the
+        // reference 4.5 s later and 7.5 ms late on top of that.
+        let rate = Self.fastRate
+        let target = 1_440.25
+        let reference = target + SyncProbe.Layout.laneSpacingSeconds * rate + 60   // +7.5 ms
+        let quiet = 0.02
+        let loud = quiet * pow(10, 11.0 / 20)
+        let rec = renderLanes(length: 72_000, sampleRate: rate,
+                              lanes: [PlacedLane(delaySamples: target, gain: quiet),
+                                      PlacedLane(delaySamples: target + 112, gain: quiet * 0.4),
+                                      PlacedLane(delaySamples: reference, gain: loud),
+                                      PlacedLane(delaySamples: reference + 72, gain: loud * 0.4)],
+                              noiseRMS: 0.03)
         let correlator = SyncProbeCorrelator(sampleRate: rate)
-        let m = try #require(correlator.relativeOffset(probeA: up, probeB: down,
-                                                       recording: rec),
-                             "quiet probes under loud noise are the design point")
-        let expected = (delayDown - delayUp) / rate
-        #expect(abs(m.offsetSeconds - expected) < 0.000_1,
-                "blend-grade needs ±6 ms; the probe delivers sub-0.1 ms: got \(m.offsetSeconds * 1000) ms")
+        let lanes = try #require(
+            correlator.laneArrivals(of: SyncProbe.samples(.probe(sampleRate: rate)), in: rec,
+                                    laneSpacingSeconds: SyncProbe.Layout.laneSpacingSeconds,
+                                    maxSkewSeconds: SyncProbe.Layout.maxSkewSeconds),
+            "both lanes under loud noise are the design point")
+        #expect(abs(Self.skewMs(lanes, rate: rate) - 7.5) < 0.1,
+                "got \(Self.skewMs(lanes, rate: rate)) ms, wanted 7.5 ms")
+        #expect(lanes.earlier.peakToSidelobe >= correlator.minPeakToSidelobe,
+                "the quiet target lane clears the gate: PSR \(lanes.earlier.peakToSidelobe)")
     }
 
-    @Test func theTwoLaneBandsDoNotOverlap() {
-        // The isolation between the lanes is their disjoint bands, not their
-        // opposite sweep directions — see the note on `SyncProbe`. Overlap
-        // them again and the loud lane's leakage buries the quiet one.
-        let up = SyncProbe.SweepDesign.upSweep(sampleRate: 48_000)
-        let down = SyncProbe.SweepDesign.downSweep(sampleRate: 48_000)
-        let upBand = (min(up.startHz, up.endHz), max(up.startHz, up.endHz))
-        let downBand = (min(down.startHz, down.endHz), max(down.startHz, down.endHz))
-        #expect(upBand.0 > downBand.1,
-                "the lanes must not share a hertz: up \(upBand), down \(downBand)")
-        #expect(upBand.0 / downBand.1 >= 1.25,
-                "abutting edges lose the isolation — keep a guard gap")
+    /// Red if the second lane is searched over the whole correlation again,
+    /// or only on the side after the first arrival: here the louder lane is
+    /// the EARLIER one, so the quiet reference sits after it.
+    /// Red if the probe's rival check counts the room's echo of an arrival
+    /// (or the arrival's own smear) as a rival: a Sonos Move measured live
+    /// with a reflection 22 ms after its arrival only 5 dB down and peaks
+    /// 6-9 ms apart within 3 dB, and every reading was refused.
+    @Test func anEchoJustAfterAnArrivalIsNotARival() throws {
+        let rate = Self.fastRate
+        let target = 1_440.25
+        let reference = target + SyncProbe.Layout.laneSpacingSeconds * rate + 60   // +7.5 ms
+        let rec = renderLanes(length: 72_000, sampleRate: rate,
+                              lanes: [PlacedLane(delaySamples: target, gain: 0.1),
+                                      PlacedLane(delaySamples: target + 0.008 * rate, gain: 0.07),
+                                      PlacedLane(delaySamples: target + 0.022 * rate, gain: 0.056),
+                                      PlacedLane(delaySamples: reference, gain: 0.1)],
+                              noiseRMS: 0.005)
+        let correlator = SyncProbeCorrelator(sampleRate: rate)
+        let lanes = try #require(
+            correlator.laneArrivals(of: SyncProbe.samples(.probe(sampleRate: rate)), in: rec,
+                                    laneSpacingSeconds: SyncProbe.Layout.laneSpacingSeconds,
+                                    maxSkewSeconds: SyncProbe.Layout.maxSkewSeconds))
+        #expect(abs(Self.skewMs(lanes, rate: rate) - 7.5) < 0.1,
+                "the direct arrival wins: got \(Self.skewMs(lanes, rate: rate)) ms")
+        #expect(lanes.earlier.peakMargin >= 1.995,
+                "an echo 22 ms on and a peak 8 ms on are the arrival's, not rivals: \(lanes.earlier.peakMargin)")
     }
 
-    @Test func theQuietLaneIsFoundBesideALaneTwentyThreeDecibelsLouder() throws {
-        // The live 2026-08-28 refusal, to scale. One mic, built into the Mac:
-        // the Mac's own speakers arrived at amplitude 0.0395 and the Bluetooth
-        // speaker across the room at 0.00268 — 23.4 dB down — over a room
-        // noise floor of −71 dBFS. Both sweeps were plainly audible and every
-        // run was refused, because with both lanes sharing 500 Hz–10 kHz the
-        // loud lane's cross-correlation leakage stood ABOVE the quiet lane's
-        // true peak. Nothing here is quiet in absolute terms; the imbalance
-        // alone is the whole failure.
-        let rate = 48_000.0
-        let upDesign = SyncProbe.SweepDesign.upSweep(sampleRate: rate)
-        let downDesign = SyncProbe.SweepDesign.downSweep(sampleRate: rate)
-        let delayDown = 21_684.0   // 451.75 ms
-        let delayUp = 20_590.0     // 428.958 ms → true Δ exactly −22.79 ms
-        let rec = renderScene(length: 96_000, sampleRate: rate,
-                              probes: [
-                                PlacedProbe(design: downDesign, delaySamples: delayDown,
-                                            gain: 0.0395),
-                                PlacedProbe(design: downDesign, delaySamples: delayDown + 4_800,
-                                            gain: 0.0135),
-                                PlacedProbe(design: upDesign, delaySamples: delayUp,
-                                            gain: 0.00268),
-                                PlacedProbe(design: upDesign, delaySamples: delayUp + 4_800,
-                                            gain: 0.00092),
-                              ],
+    @Test func theQuietLaneIsFoundBesideALaneTenDecibelsLouder() throws {
+        // Target 10 dB louder than the reference this time, arriving 22.79 ms
+        // early on top of the staged spacing, each with an echo 100 ms on.
+        let rate = Self.fastRate
+        let target = 1_600.0
+        let reference = target + SyncProbe.Layout.laneSpacingSeconds * rate - 182.32   // −22.79 ms
+        let loud = 0.0395
+        let quiet = loud * pow(10, -10.0 / 20)
+        let rec = renderLanes(length: 72_000, sampleRate: rate,
+                              lanes: [PlacedLane(delaySamples: target, gain: loud),
+                                      PlacedLane(delaySamples: target + 800, gain: loud * 0.34),
+                                      PlacedLane(delaySamples: reference, gain: quiet),
+                                      PlacedLane(delaySamples: reference + 800, gain: quiet * 0.34)],
                               noiseRMS: 0.000_5)
         let correlator = SyncProbeCorrelator(sampleRate: rate)
-        let m = try #require(
-            correlator.relativeOffset(probeA: SyncProbe.samples(downDesign),
-                                      probeB: SyncProbe.samples(upDesign),
-                                      recording: rec),
-            "a 23 dB quieter speaker is the ordinary geometry, not a bad capture")
-        let expected = (delayUp - delayDown) / rate
-        #expect(abs(m.offsetSeconds - expected) < 0.000_5,
-                "got \(m.offsetSeconds * 1000) ms, wanted \(expected * 1000) ms")
-        #expect(m.arrivalB.peakToSidelobe >= correlator.minPeakToSidelobe,
-                "the quiet lane clears the shipping gate with margin, not barely: PSR \(m.arrivalB.peakToSidelobe)")
+        let lanes = try #require(
+            correlator.laneArrivals(of: SyncProbe.samples(.probe(sampleRate: rate)), in: rec,
+                                    laneSpacingSeconds: SyncProbe.Layout.laneSpacingSeconds,
+                                    maxSkewSeconds: SyncProbe.Layout.maxSkewSeconds),
+            "a 10 dB quieter speaker is the ordinary geometry, not a bad capture")
+        #expect(abs(Self.skewMs(lanes, rate: rate) + 22.79) < 0.1,
+                "got \(Self.skewMs(lanes, rate: rate)) ms, wanted −22.79 ms")
+        #expect(lanes.later.peakToSidelobe >= correlator.minPeakToSidelobe,
+                "the quiet reference lane clears the gate: PSR \(lanes.later.peakToSidelobe)")
     }
 
     @Test func aLateReflectionIsNotEvidenceAgainstTheArrivalItEchoes() throws {
@@ -346,9 +396,10 @@ import Testing
         }
 
         let unweighted = SyncProbeCorrelator.correlate(recording: recording, probe: probe,
-                                                       ambientNoise: nil)
+                                                       ambientNoise: nil, sampleRate: Self.fastRate)
         let atZero = SyncProbeCorrelator.correlate(recording: recording, probe: probe,
-                                                   ambientNoise: nil, whiteningExponent: 0)
+                                                   ambientNoise: nil, whiteningExponent: 0,
+                                                   sampleRate: Self.fastRate)
         #expect(unweighted != nil)
         #expect(unweighted == atZero)
     }
