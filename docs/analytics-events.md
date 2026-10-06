@@ -80,9 +80,9 @@ itself.
 | `connection:connected` | mac | `kind` | the speaker's connection kind | A non-local speaker successfully connects. |
 | `connection:diagnosis_shown` | mac | `cause` | the failure cause | The connection-failure diagnosis panel is shown for a speaker. |
 | `connection:retry_clicked` | mac | — | — | The diagnosis panel's Retry is clicked. |
-| `airplay:code_prompt_shown` | mac | `kind` | `password` | The sheet asking for a speaker's AirPlay password opens on the Mac. |
-| `airplay:code_submitted` | mac | `kind`, `outcome`, `source` | `kind`: `password`; `outcome`: `accepted`, `rejected`, `failed`; `source`: `mac`, `phone` | A submitted password's connection attempt ends: connected, refused as wrong, or failed for another reason. |
-| `airplay:code_forgotten` | mac | `kind` | `password` | The user removes a speaker's saved password from the device page. |
+| `airplay:code_prompt_shown` | mac | `kind` | `password`, `onScreenCode` | The sheet asking for a speaker's AirPlay password or on-screen code opens on the Mac. |
+| `airplay:code_submitted` | mac | `kind`, `outcome`, `source` | `kind`: `password`, `onScreenCode`; `outcome`: `accepted`, `rejected`, `failed`; `source`: `mac`, `phone` | A submitted password or on-screen code's connection attempt ends: connected, refused as wrong, or failed for another reason. |
+| `airplay:code_forgotten` | mac | `kind` | `password`, `onScreenCode` | The user removes a speaker's saved password or pairing key from the device page. |
 | `streaming:daily_active` | mac | `speaker_count` | count of non-local connected speakers | Once per local calendar day, the first time audio reaches a speaker. |
 | `scene:created` | mac | `source`; `member_count`, `already_existed` (only from the sheet) | `source`: `sheet` or `mixer`; `member_count`: count of speakers in the new scene; `already_existed`: `true`/`false` | A scene is saved, either from the mixer's "Save as scene" (which sends only `source: mixer`) or the dedicated creation sheet (which sends `source: sheet` plus `member_count` and `already_existed`). |
 | `scene:renamed` | mac | — | — | A scene is renamed and saved. |
@@ -126,7 +126,7 @@ itself.
 | `intro:find_mac_tapped` | phone | `mac_id` (absent before a Mac connects) | — | The intro card's "Find your Mac" control is tapped. |
 | `connect:connected` | phone | `mac_id` | — | The phone successfully connects to a Mac. |
 | `demo:entered` | phone | `mac_id` (absent — demo mode has no real Mac) | — | The phone enters demo mode (the pretend Mac with six pretend speakers). |
-| `speaker:password_prompt_shown` | phone | `mac_id` | — | The phone's sheet asking for a speaker's AirPlay password opens. |
+| `speaker:password_prompt_shown` | phone | `mac_id`, `kind` | `kind`: `password`, `onScreenCode` | The phone's sheet asking for a speaker's AirPlay password or on-screen code opens. |
 | `sync:opened` | phone | `mac_id`, `speaker_kind` | `speaker_kind`: `bluetooth`, `airplay`, `cast` | The sync screen for one speaker is opened. |
 | `sync:measure_tapped` | phone | `mac_id`, `speaker_kind` | see above | The Measure (tuning fork) button is tapped, starting a probe run. |
 | `sync:verdict` | phone | `mac_id`, `speaker_kind`, `offset_source`, `settled`, `offset_ms_bucket`, `verdict` | `offset_source`: `measured`, `firstPass`, `fromLastTime`, `byEar`; `settled`: `true`/`false`, the Mac's clock verdict for that speaker at this moment; `offset_ms_bucket`: `0-9`, `10-39`, `40-99`, `100+` (absolute value, in milliseconds); `verdict`: `applied`, `firstPass`, `refused` | A probe run finishes and the phone shows its result. |

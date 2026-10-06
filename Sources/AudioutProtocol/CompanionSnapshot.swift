@@ -32,12 +32,12 @@ public struct DeviceState: Codable, Equatable, Sendable {
         /// Present only when `state == "failed"`.
         public var failureCause: String?
         /// `"password"` when the Mac has no stored password for a
-        /// password-protected speaker; `"pin"` is reserved for on-screen code
-        /// pairing. Absent otherwise, in any state.
+        /// password-protected speaker; `"onScreenCode"` for an on-screen-code
+        /// speaker with no stored pairing. Absent otherwise, in any state.
         public var credentialKind: String?
         /// How the speaker gates senders, as the Mac reads it from Bonjour:
-        /// `open`, `password`, `onScreenCode`, `homeMembersOnly`. Absent from
-        /// an older Mac. Present in every state.
+        /// `open`, `password`, `onScreenCode`, `onScreenCodeEveryTime`,
+        /// `homeMembersOnly`. Absent from an older Mac. Present in every state.
         public var access: String?
 
         public init(
