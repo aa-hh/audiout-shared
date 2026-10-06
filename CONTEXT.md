@@ -45,5 +45,5 @@ The phone app running against a pretend Mac with six pretend speakers, for a rev
 _Avoid_: Sandbox, preview, sample mode, mock
 
 **Align by ear**:
-The Mac-only fallback that finds an offset from the user's answers to paired clicks, with no microphone.
-_Avoid_: Wizard, calibration
+Setting an offset by listening instead of measuring. On the Mac it is the fallback that finds the offset from the user's answers to paired clicks, with no microphone. On the phone it is the page where the user nudges the offset while the Mac plays clicks through both speakers. Either way the result is an offset whose source is by ear.
+_Avoid_: Wizard, calibration, fine tune, adjust by ear
