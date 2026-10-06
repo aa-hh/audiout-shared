@@ -184,8 +184,8 @@ list.
 
 | exception type | properties | allowed values | when it fires |
 |---|---|---|---|
-| `airplay:session_failed` | `state`, `cause`, `wasStreaming` | `state`: `failed`, `passwordRequired`; `cause`: `authRequired`, `codeRequired`, `homeMembersOnly`, `droppedMidStream`, `unknown`; `wasStreaming`: `true`, `false` | A live AirPlay session dies while the user still wants that speaker on. |
-| `airplay:connect_failed` | `cause` | `timingUnavailable`, `authRequired`, `codeRequired`, `homeMembersOnly`, `timedOut`, `unknown` | An AirPlay speaker fails to connect. |
+| `airplay:session_failed` | `state`, `cause`, `wasStreaming` | `state`: `failed`, `passwordRequired`; `cause`: `authRequired`, `codeRequired`, `codeEveryTimeUnsupported`, `homeMembersOnly`, `droppedMidStream`, `unknown`; `wasStreaming`: `true`, `false` | A live AirPlay session dies while the user still wants that speaker on. |
+| `airplay:connect_failed` | `cause` | `timingUnavailable`, `authRequired`, `codeRequired`, `codeEveryTimeUnsupported`, `homeMembersOnly`, `timedOut`, `unknown` | An AirPlay speaker fails to connect. |
 | `airplay:password_store_failed` | `operation` | `save`, `delete` | The Keychain refused to save or delete a speaker's AirPlay password; the speaker id and OSStatus stay local. |
 | `capture:whole_system_failed` | `kind`, `retrying` | `kind`: `tap_creation_failed`, `aggregate_device_failed`, `format_read_failed`, `device_lost`, `os_unsupported`; `retrying`: `true`, `false` | System audio capture fails while capture is wanted. |
 | `local_playback:start_failed` | `site` | `synced_local`, `app_routes`, `capture_state`, `leveled` | Playing through the Mac's own speakers fails to start (a "play everywhere" selection or a "This Mac"-routed app), so the Mac stays silent while the speakers play. The error text stays local. |
