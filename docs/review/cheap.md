@@ -18,7 +18,7 @@ Repo trap checks. For each, look at the diff and report a HIGH only if the diff 
 - The wire encoding of an existing `CompanionMessage` or `CompanionCommand` case changes (a renamed case or key, a changed associated value, a changed raw value) instead of a new case being added.
 - `CompanionProto.version` is bumped for a purely additive case, or not bumped when an existing case's meaning changes in a way an old peer would misread.
 - An app icon (or any icon data) is folded into `Snapshot` instead of riding the separate `AppIconPayload` / `CompanionAppIcons` request and response.
-- In ProbeKit, the DOWN (reference) and UP (target) lanes are swapped, or the sign of `offsetMs` flips (positive must mean the target sounded late), or trim arithmetic moves into this package.
+- In ProbeKit, the earlier arrival stops being read as the target (the later is the reference; both speakers play one glide template in turn), the package stops removing `SyncProbe.Layout.laneSpacingSeconds` itself, the probe's timing is hand-copied instead of read from `SyncProbe.Layout`, or the sign of `offsetMs` flips (positive must mean the target sounded late), or trim arithmetic moves into this package.
 - A path that used to throw (`recordingTooShort`, `probeNotFound`) now returns a guessed or best-effort number instead.
 - `Package.swift` gains a `dependencies:` entry or a shell-out, or any file gains a GPL header or code copied from a GPL source.
 - A new source file lacks the `// SPDX-License-Identifier: MIT` first line.

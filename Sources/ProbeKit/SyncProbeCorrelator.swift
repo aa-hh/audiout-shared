@@ -14,7 +14,7 @@
 //
 // It lives in the root `ProbeKit` package and BOTH apps depend on that package:
 // the Mac's built-in-mic calibration (`AudioutCore`) and the iPhone companion's
-// phone-as-microphone measurement. The Mac stages the sweeps this file
+// phone-as-microphone measurement. The Mac stages the probe this file
 // describes, so the two ends have to agree on them exactly — a divergence would
 // not be a local bug, it would be a measurement of the wrong signal reported as
 // a confident number. The package is what makes agreement structural; it
@@ -29,92 +29,183 @@ import Foundation
 /// mic-measurement tier above the by-ear wizard, dev/notes brief
 /// `mic-probe-calibration-brief.md`).
 ///
-/// The probe is an exponential sine sweep: constant amplitude, frequency
-/// rising (or falling) exponentially between two band edges. Its virtue for
-/// this job is the time–bandwidth product — a one-second sweep concentrates
-/// 30–40 dB of processing gain into one correlation peak, so a probe played
-/// quietly under real room noise still yields an unambiguous arrival time.
+/// **One template, both speakers, in turn.** Each speaker plays the same lane:
+/// an exponential glide falling 3.6 kHz → 150 Hz over 3.5 s, its top tilted
+/// 18 dB down, over a held 110 + 165 Hz drone. The Bluetooth
+/// speaker plays first and the reference speaker ``Layout/laneSpacingSeconds``
+/// later, so the lanes are separated in TIME, not frequency, and each is
+/// searched only where the staging puts it
+/// (``SyncProbeCorrelator/laneArrivals(of:in:ambientNoise:searchFrom:laneSpacingSeconds:maxSkewSeconds:)``).
+/// Sharing one band is safe only because of that: two different signals in
+/// one band separate by 21–35 dB at most, against a 23 dB level gap between
+/// the Mac's own speaker and one across the room.
 ///
-/// **The two lanes occupy DISJOINT bands, and that separation is what lets
-/// both speakers play at once.** Opposite sweep DIRECTIONS over a shared band
-/// are not enough: measured, an up sweep and a down sweep across 500 Hz–10 kHz
-/// cross-correlate only ~33 dB down. The recording comes from the Mac's own
-/// built-in microphone, so the Mac's own speakers are inches away while the
-/// other speaker is across the room — a level imbalance of 23 dB in the live
-/// 2026-08-28 capture. The loud lane's leakage then sits ABOVE the quiet
-/// lane's true peak, and every measurement is refused for want of confidence
-/// while both sweeps are plainly audible. Disjoint bands share no bins at all
-/// (measured cross-correlation −134 dB), so the tolerable imbalance stops
-/// being a probe property and becomes the room's own noise floor — 53 dB for
-/// the distant speaker in that same capture. Keep the GUARD GAP between the
-/// two bands when tuning them; abutting edges lose most of the isolation.
+/// The energy sits low because the previous probe's 3.2–10 kHz lane was heard
+/// as shrill. The faint top is what the timing locks onto: a glide confined
+/// to 150–600 Hz came back from a real Bluetooth speaker as a 25 ms wide
+/// smear of near-equal peaks.
+/// A glide still matters: pure noise cannot be found at a pleasant level, and
+/// anything that sweeps can (research note
+/// `dev/notes/wizard-sync-tone-2026-10-06/shaped/ROUND3-OPTIONS.md`).
 ///
-/// The quiet, distant lane gets the HIGH band: room noise is dominated by
-/// low-frequency rumble, and that same capture measured its noise floor 12 dB
-/// lower above 3 kHz — worth more than the extra air absorption up there.
-///
-/// The band edges deliberately stay inside 500 Hz–10 kHz: small speakers roll
-/// off below a few hundred Hz, and A2DP codecs commonly roll off above
-/// 14–18 kHz, so probe energy parked outside this band would be spent where
-/// the physical path may silently drop it.
+/// **The drone is decoration, outside the template.** A held chord matches no
+/// moment of a moving glide better than any other, so it creates no rival
+/// peak; it costs only the level it takes from the glide. A MOVING decoration
+/// does create one: a glide a fifth below matches the template about a second
+/// early, only 3 dB down. Never decorate with a parallel glide.
 public enum SyncProbe {
 
-    /// One sweep's parameters. `startHz > endHz` is legal and produces the
-    /// DOWN sweep; both edges must be positive and distinct.
-    public struct SweepDesign: Equatable, Sendable {
+    /// One exponential glide's parameters. `startHz > endHz` falls; both edges
+    /// must be positive and distinct.
+    public struct GlideDesign: Equatable, Sendable {
         public var sampleRate: Double
         public var startHz: Double
         public var endHz: Double
         public var duration: Double
-        /// Raised-cosine fade applied at both ends, so the probe starts and
-        /// ends without a click that would smear the correlation peak (and
-        /// annoy the listener). 80 ms removes the click at each end; the
-        /// level is the Mac's, not this package's (docs/adr/0001-quieter-sweeps.md).
-        public var fadeDuration: Double
+        /// Amplitude of each harmonic: index 0 is the fundamental, index h−1
+        /// the h-th harmonic, each an exact multiple of the fundamental's
+        /// phase.
+        public var partialLevels: [Double]
+        /// Raised-cosine fades at each end, so the probe starts and ends
+        /// without a click. The level is the Mac's, not this package's.
+        public var fadeInSeconds: Double
+        public var fadeOutSeconds: Double
+        /// Level change per octave above `endHz`, applied as the glide passes
+        /// each frequency. Negative darkens the top: −4 dB/oct puts 3.6 kHz
+        /// about 18 dB under 150 Hz. 0 is a flat glide.
+        public var tiltDBPerOctave: Double = 0
 
-        /// The Bluetooth lane — the one heard from across the room, hence the
-        /// high band (see the type note).
-        public static func upSweep(sampleRate: Double, duration: Double = 1.0) -> SweepDesign {
-            SweepDesign(sampleRate: sampleRate, startHz: 3_200, endHz: 10_000,
-                        duration: duration, fadeDuration: 0.08)
-        }
-
-        /// The engine/Mac lane — nearest the microphone, so it takes the low
-        /// band and its noisier floor.
-        public static func downSweep(sampleRate: Double, duration: Double = 1.0) -> SweepDesign {
-            SweepDesign(sampleRate: sampleRate, startHz: 2_000, endHz: 500,
-                        duration: duration, fadeDuration: 0.08)
+        /// The shipping template, on both speakers. One wide glide from 3.6 kHz
+        /// down to 150 Hz with its top 18 dB down, so it sounds low but keeps
+        /// a faint bright edge the timing locks onto. A glide confined to
+        /// 150–600 Hz measured live (Sonos Move, 2026-10-06) as a 25 ms wide
+        /// smear of near-equal peaks and was refused on every run. No
+        /// harmonics: a second glide at a fixed ratio puts a copy of the
+        /// template inside the other lane's search window.
+        public static func probe(sampleRate: Double) -> GlideDesign {
+            GlideDesign(sampleRate: sampleRate, startHz: 3_600, endHz: 150,
+                        duration: Layout.glideSeconds,
+                        partialLevels: [1],
+                        fadeInSeconds: 0.3, fadeOutSeconds: 0.6,
+                        tiltDBPerOctave: -4)
         }
     }
 
-    /// The sweep's instantaneous value at time `t` seconds from its own start,
+    /// Where the lanes sit in time, from the probe's epoch.
+    public enum Layout {
+        /// The drone starts this long before the glide.
+        public static let bedLeadSeconds = 0.5
+        public static let glideSeconds = 3.5
+        /// One lane: drone lead plus glide.
+        public static let laneSeconds = 4.0
+        /// Lane start to lane start, which is also glide start to glide
+        /// start. The Bluetooth lane plays first.
+        public static let laneSpacingSeconds = 4.5
+        public static let totalSeconds = laneSpacingSeconds + laneSeconds
+        /// The plausible skew between the two speakers. The second lane is
+        /// searched only ``laneSpacingSeconds`` ± this from the first one
+        /// found, so nothing else in the correlation can be read as it.
+        /// razor: deliberate ceiling; raise it only together with a wider gap
+        /// between the glides.
+        public static let maxSkewSeconds = 1.5
+        /// The probe sound's name in analytics events.
+        public static let analyticsName = "glide_chord"
+    }
+
+    /// The held chord under each glide.
+    public enum Drone {
+        public static let frequenciesHz = [110.0, 165.0]
+        /// The drone's RMS over the lane against the glide's RMS over its own
+        /// length.
+        public static let levelBelowGlideDB = -6.0
+        public static let fadeInSeconds = 0.3
+        public static let fadeOutSeconds = 0.6
+        public static let duration = Layout.laneSeconds
+
+        /// The drone at unit amplitude per sine, fades included, zero outside
+        /// `[0, duration)`.
+        static func value(at t: Double) -> Double {
+            guard t >= 0, t < duration else { return 0 }
+            let sum = frequenciesHz.reduce(0.0) { $0 + sin(2 * .pi * $1 * t) }
+            return faded(sum, at: t, duration: duration,
+                         fadeIn: fadeInSeconds, fadeOut: fadeOutSeconds)
+        }
+
+        /// The factor on ``value(at:)`` that puts the drone's RMS over the
+        /// lane ``levelBelowGlideDB`` under the glide's RMS.
+        static func gain(sampleRate: Double) -> Double {
+            func rms(_ x: [Double]) -> Double {
+                x.isEmpty ? 0 : (x.reduce(0) { $0 + $1 * $1 } / Double(x.count)).squareRoot()
+            }
+            let glide = samples(.probe(sampleRate: sampleRate)).map(Double.init)
+            let count = Int((duration * sampleRate).rounded())
+            let drone = (0..<count).map { value(at: Double($0) / sampleRate) }
+            let droneRMS = rms(drone)
+            return droneRMS > 0 ? rms(glide) / droneRMS * pow(10, levelBelowGlideDB / 20) : 0
+        }
+    }
+
+    /// The lane the Mac stages on each speaker, ``Layout/laneSeconds`` long:
+    /// the drone from 0, the glide from ``Layout/bedLeadSeconds``, divided by
+    /// its own peak so it peaks at exactly 1.
+    ///
+    /// The drone is decoration. The template the analyzers correlate against
+    /// is `samples(.probe(sampleRate:))` alone.
+    public static func lane(sampleRate: Double) -> [Float] {
+        let count = Int((Layout.laneSeconds * sampleRate).rounded())
+        let lead = Int((Layout.bedLeadSeconds * sampleRate).rounded())
+        let droneGain = Drone.gain(sampleRate: sampleRate)
+        var lane = (0..<count).map { droneGain * Drone.value(at: Double($0) / sampleRate) }
+        for (i, g) in samples(.probe(sampleRate: sampleRate)).enumerated() where lead + i < count {
+            lane[lead + i] += Double(g)
+        }
+        let peak = lane.reduce(0) { max($0, abs($1)) }
+        return lane.map { Float(peak > 0 ? $0 / peak : 0) }
+    }
+
+    /// The glide's instantaneous value at time `t` seconds from its own start,
     /// fades included, zero outside `[0, duration)`. Exposed separately from
     /// ``samples(_:)`` so tests can render a FRACTIONALLY delayed arrival
     /// analytically instead of resampling one.
-    public static func value(_ design: SweepDesign, at t: Double) -> Double {
+    public static func value(_ design: GlideDesign, at t: Double) -> Double {
         guard t >= 0, t < design.duration else { return 0 }
         let ratio = design.endHz / design.startHz
         let lnRatio = log(ratio)
         // phase(t) = 2π·f₀·T/ln r · (e^(t·ln r / T) − 1)  — Farina's sweep.
         let k = 2 * Double.pi * design.startHz * design.duration / lnRatio
         let phase = k * (exp(t / design.duration * lnRatio) - 1)
-        var sample = sin(phase)
-        let fade = min(design.fadeDuration, design.duration / 2)
-        if fade > 0 {
-            let fromStart = t
-            let fromEnd = design.duration - t
-            if fromStart < fade {
-                sample *= 0.5 - 0.5 * cos(.pi * fromStart / fade)
-            }
-            if fromEnd < fade {
-                sample *= 0.5 - 0.5 * cos(.pi * fromEnd / fade)
-            }
+        var sample = 0.0
+        for (index, level) in design.partialLevels.enumerated() {
+            sample += level * sin(Double(index + 1) * phase)
+        }
+        if design.tiltDBPerOctave != 0 {
+            let octavesAboveEnd = log2(design.startHz / design.endHz)
+                * (1 - t / design.duration)
+            sample *= pow(10, design.tiltDBPerOctave * octavesAboveEnd / 20)
+        }
+        return faded(sample, at: t, duration: design.duration,
+                     fadeIn: design.fadeInSeconds, fadeOut: design.fadeOutSeconds)
+    }
+
+    /// Raised-cosine fade in over `fadeIn` from 0 and out over `fadeOut`
+    /// before `duration`, each capped at half the duration.
+    private static func faded(_ sample: Double, at t: Double, duration: Double,
+                              fadeIn: Double, fadeOut: Double) -> Double {
+        var sample = sample
+        let fadeIn = min(fadeIn, duration / 2)
+        let fadeOut = min(fadeOut, duration / 2)
+        if fadeIn > 0, t < fadeIn {
+            sample *= 0.5 - 0.5 * cos(.pi * t / fadeIn)
+        }
+        let fromEnd = duration - t
+        if fadeOut > 0, fromEnd < fadeOut {
+            sample *= 0.5 - 0.5 * cos(.pi * fromEnd / fadeOut)
         }
         return sample
     }
 
-    /// The sweep rendered at its design sample rate.
-    public static func samples(_ design: SweepDesign) -> [Float] {
+    /// The glide rendered at its design sample rate.
+    public static func samples(_ design: GlideDesign) -> [Float] {
         precondition(design.startHz > 0 && design.endHz > 0 && design.startHz != design.endHz,
                      "an exponential sweep needs two positive, distinct band edges")
         let count = Int((design.duration * design.sampleRate).rounded())
@@ -141,13 +232,15 @@ public enum SyncProbe {
 /// segment (a lead-in slice of the same recording, before the probes start),
 /// correlation bins are divided by the measured noise power spectrum, so a
 /// tonal interferer (a hum, a voice) is discounted instead of being whitened
-/// up to equal vote. The chirp path adds no whitening on top of that: a
-/// sweep's magnitude is already flat across its band, so dividing by it buys
-/// nothing and throws away per-band SNR, which is exactly the information a
-/// noisy party room needs (the 2026 TDOA-probing result: trained estimators
-/// learn magnitude-aware weighting and never learn PHAT).
+/// up to equal vote. The chirp path adds no whitening on top of that. The
+/// probe's −4 dB/octave tilt is deliberate (it keeps the glide low and
+/// pleasant), and dividing by the probe's magnitude would undo it inside the
+/// filter, lifting the faint top to a full vote and throwing away per-band
+/// SNR, which is exactly the information a noisy party room needs (the 2026
+/// TDOA-probing result: trained estimators learn magnitude-aware weighting and
+/// never learn PHAT).
 ///
-/// ``correlate(recording:probe:ambientNoise:whiteningExponent:)`` does take a
+/// ``correlate(recording:probe:ambientNoise:whiteningExponent:sampleRate:)`` does take a
 /// whitening exponent, defaulted to 0 so every chirp caller keeps the filter
 /// above. ``PassiveDriftCorrelator`` passes a non-zero value because its
 /// reference is music, not a sweep: a pop mix's magnitude is anything but
@@ -214,6 +307,13 @@ public struct SyncProbeCorrelator {
     /// said 5 ms in prose; the harness is what the two sides are measured
     /// against, so 3 ms is what ships.
     public var peakMarginSeparationSeconds: Double = 0.003
+    /// How far from the peak a match must sit to count as a rival reading of
+    /// the probe. Measured live (Sonos Move and a MacBook, 2026-10-06): the
+    /// glide's energy sits low, and a Move smears its arrival into peaks up
+    /// to 9 ms apart within 3 dB, while two runs still agreed to 1.3 ms.
+    /// The guard is for readings a whole echo or a second wrong; that smear is
+    /// the arrival's own width.
+    public var probeMarginSeparationSeconds: Double = 0.012
 
     /// `median(|x|) = 0.6745 σ` for zero-mean Gaussian `x` — the constant that
     /// turns a robust median into a standard deviation.
@@ -244,21 +344,18 @@ public struct SyncProbeCorrelator {
         /// against. Infinity when the neighbourhood holds too few lags to
         /// summarise.
         public var localScore: Double
-        /// Peak height over the highest rival lag inside the searched range:
-        /// the best lag more than ``SyncProbeCorrelator/peakMarginSeparationSeconds``
-        /// away from this one. 1 means the runner-up matched the winner;
-        /// infinity when there is no positive rival at all.
+        /// Peak height over the highest rival lag inside the searched range.
+        /// 1 means the runner-up matched the winner; infinity when there is no
+        /// positive rival at all. Two readings of "rival":
+        /// ``SyncProbeCorrelator/arrival(of:in:ambientNoise:)`` takes the best
+        /// lag more than ``SyncProbeCorrelator/peakMarginSeparationSeconds``
+        /// away on either side. The probe path
+        /// (``SyncProbeCorrelator/laneArrivals(of:in:ambientNoise:searchFrom:laneSpacingSeconds:maxSkewSeconds:)``)
+        /// skips ``SyncProbeCorrelator/probeMarginSeparationSeconds`` before
+        /// the peak and the whole ``SyncProbeCorrelator/reverbShadowSeconds``
+        /// after it, so the arrival's own smear and the room's echoes of it
+        /// are not counted.
         public var peakMargin: Double
-    }
-
-    /// Two arrivals from one recording, reduced to the number the sync engine
-    /// wants.
-    public struct Measurement: Equatable {
-        /// Arrival of `probeB` minus arrival of `probeA`, seconds. Positive
-        /// means B sounded later.
-        public var offsetSeconds: Double
-        public var arrivalA: Arrival
-        public var arrivalB: Arrival
     }
 
     /// Finds `probe` in `recording`, or nil when no convincing peak exists.
@@ -273,7 +370,7 @@ public struct SyncProbeCorrelator {
         // FFT length, always ≥ `searchCount`; the count check states that
         // rather than trusting it, since every index below rides on it.
         guard let corr = Self.correlate(recording: recording, probe: probe,
-                                        ambientNoise: ambientNoise),
+                                        ambientNoise: ambientNoise, sampleRate: sampleRate),
               corr.count >= searchCount
         else { return nil }
 
@@ -298,8 +395,15 @@ public struct SyncProbeCorrelator {
     /// accounted for, and is not scored against it either. The background
     /// estimates still count those lags: a loud arrival 40 ms away really is
     /// part of what this correlation looks like.
+    ///
+    /// `marginIgnoresEchoes` is the probe's reading of ``Arrival/peakMargin``:
+    /// lags inside ``probeMarginSeparationSeconds`` of the peak are its own
+    /// main lobe, and lags in the ``reverbShadowSeconds`` after it are the
+    /// room's echoes of it, so neither counts as a rival. Only a match before
+    /// the arrival, or past the shadow, can.
     func arrival(inCorrelation corr: [Float], searchCount: Int, lags: Range<Int>,
-                 claimed: [Int] = [], claimRadius: Int = 0) -> Arrival? {
+                 claimed: [Int] = [], claimRadius: Int = 0,
+                 marginIgnoresEchoes: Bool = false) -> Arrival? {
         let lo = max(0, lags.lowerBound)
         let hi = min(searchCount, lags.upperBound)
         guard lo < hi, searchCount <= corr.count else { return nil }
@@ -344,10 +448,13 @@ public struct SyncProbeCorrelator {
         // The strongest lag that is not this arrival. Whether it is a rival
         // reading of the same sound or the music's next repeat, a peak the
         // runner-up nearly matches is a coin toss the caller should not act on.
-        let separation = max(1, Int(peakMarginSeparationSeconds * sampleRate))
+        let separation = max(1, Int((marginIgnoresEchoes ? probeMarginSeparationSeconds
+                                                         : peakMarginSeparationSeconds) * sampleRate))
+        let echoes = marginIgnoresEchoes ? shadow : separation
         var runnerUp = -Float.infinity
         for i in lo..<hi
-        where abs(i - peakIndex) > separation && corr[i] > runnerUp && !isClaimed(i) {
+        where (i < peakIndex - separation || i > peakIndex + echoes)
+            && corr[i] > runnerUp && !isClaimed(i) {
             runnerUp = corr[i]
         }
         let margin = runnerUp > 0 ? Double(peakValue) / Double(runnerUp) : .infinity
@@ -378,17 +485,56 @@ public struct SyncProbeCorrelator {
         return sidelobe > 0 ? Double(peak) / sidelobe : .infinity
     }
 
-    /// The one-shot calibration read: both probes located in one recording,
-    /// reduced to their arrival difference. Nil when either probe is missing
-    /// or unconvincing — the caller falls back to the by-ear wizard, never to
-    /// a shaky number.
-    public func relativeOffset(probeA: [Float], probeB: [Float], recording: [Float],
-                        ambientNoise: [Float]? = nil) -> Measurement? {
-        guard let a = arrival(of: probeA, in: recording, ambientNoise: ambientNoise),
-              let b = arrival(of: probeB, in: recording, ambientNoise: ambientNoise)
+    /// Both lanes of an in-turn probe located in one recording, as
+    /// `(earlier, later)`, offsets in samples from the recording's start. Nil
+    /// when either lane is missing or unconvincing — the caller falls back to
+    /// the by-ear wizard, never to a shaky number.
+    ///
+    /// Both lanes play the same `template`, so one correlation over
+    /// `recording[searchFrom...]` holds both arrivals. The stronger is found
+    /// first, anywhere. The other is searched only `laneSpacingSeconds ±
+    /// maxSkewSeconds` away from it, on either side, because the staging
+    /// fixes that spacing and nothing else in the correlation can be trusted
+    /// to stay out of the way: room reflections put weaker copies of an
+    /// arrival at fixed distances from it. Each arrival ignores the
+    /// other's neighbourhood (``reverbShadowSeconds``) when it measures
+    /// ``Arrival/peakMargin``, so the margin is about rivals, not about the
+    /// other speaker.
+    public func laneArrivals(of template: [Float], in recording: [Float],
+                             ambientNoise: [Float]? = nil, searchFrom: Int = 0,
+                             laneSpacingSeconds: Double, maxSkewSeconds: Double)
+        -> (earlier: Arrival, later: Arrival)? {
+        guard template.count > 1, searchFrom >= 0,
+              recording.count - searchFrom >= template.count
         else { return nil }
-        return Measurement(offsetSeconds: (b.sampleOffset - a.sampleOffset) / sampleRate,
-                           arrivalA: a, arrivalB: b)
+        let region = Array(recording[searchFrom...])
+        let searchCount = region.count - template.count + 1
+        guard let corr = Self.correlate(recording: region, probe: template,
+                                        ambientNoise: ambientNoise, sampleRate: sampleRate),
+              corr.count >= searchCount,
+              let strongest = arrival(inCorrelation: corr, searchCount: searchCount,
+                                      lags: 0..<searchCount, marginIgnoresEchoes: true)
+        else { return nil }
+
+        let p1 = Int(strongest.sampleOffset.rounded())
+        let near = Int(((laneSpacingSeconds - maxSkewSeconds) * sampleRate).rounded())
+        let far = Int(((laneSpacingSeconds + maxSkewSeconds) * sampleRate).rounded())
+        let claimRadius = Int(reverbShadowSeconds * sampleRate)
+        let second = [(p1 - far)..<(p1 - near + 1), (p1 + near)..<(p1 + far + 1)]
+            .compactMap { arrival(inCorrelation: corr, searchCount: searchCount, lags: $0,
+                                  claimed: [p1], claimRadius: claimRadius,
+                                  marginIgnoresEchoes: true) }
+            .max { $0.peakToSidelobe < $1.peakToSidelobe }
+        guard var second,
+              var first = arrival(inCorrelation: corr, searchCount: searchCount,
+                                  lags: 0..<searchCount,
+                                  claimed: [Int(second.sampleOffset.rounded())],
+                                  claimRadius: claimRadius, marginIgnoresEchoes: true)
+        else { return nil }
+
+        first.sampleOffset += Double(searchFrom)
+        second.sampleOffset += Double(searchFrom)
+        return first.sampleOffset <= second.sampleOffset ? (first, second) : (second, first)
     }
 
     // MARK: correlation internals
@@ -417,15 +563,20 @@ public struct SyncProbeCorrelator {
     /// why the calibration path does not want this — and only the passive
     /// drift path, where the reference is music rather than a sweep, passes a
     /// non-zero value.
+    ///
+    /// The ambient noise estimate is smoothed over 100 Hz (see
+    /// ``correlations(recording:probe:ambientNoise:whiteningExponent:bandEdgesHz:sampleRate:ambientSmoothingHz:)``).
     static func correlate(recording: [Float], probe: [Float],
                           ambientNoise: [Float]?,
-                          whiteningExponent: Double = 0) -> [Float]? {
+                          whiteningExponent: Double = 0,
+                          sampleRate: Double) -> [Float]? {
         correlations(recording: recording, probe: probe, ambientNoise: ambientNoise,
                      whiteningExponent: whiteningExponent,
-                     bandEdgesHz: [], sampleRate: 0)?.full
+                     bandEdgesHz: [], sampleRate: sampleRate,
+                     ambientSmoothingHz: 100)?.full
     }
 
-    /// ``correlate(recording:probe:ambientNoise:whiteningExponent:)`` plus one
+    /// ``correlate(recording:probe:ambientNoise:whiteningExponent:sampleRate:)`` plus one
     /// correlation per frequency band, all from the same pair of forward
     /// transforms.
     ///
@@ -439,11 +590,19 @@ public struct SyncProbeCorrelator {
     ///
     /// `bandEdgesHz` are the edges, rising, so four bands are five numbers.
     /// Empty (the default) asks for no bands and does exactly the work of
-    /// ``correlate(recording:probe:ambientNoise:whiteningExponent:)``.
+    /// ``correlate(recording:probe:ambientNoise:whiteningExponent:sampleRate:)``.
+    ///
+    /// `ambientSmoothingHz` is how wide a stretch of the ambient slice's
+    /// spectrum is averaged into each bin's noise estimate. Nil keeps a fixed
+    /// 64 bins either side, whatever the transform length. The probe passes a
+    /// fixed width in hertz: its recordings are several seconds long, so 64
+    /// bins would be only a few hertz and the estimate would stay as ragged
+    /// as one periodogram.
     static func correlations(recording: [Float], probe: [Float],
                              ambientNoise: [Float]?,
                              whiteningExponent: Double = 0,
-                             bandEdgesHz: [Double], sampleRate: Double)
+                             bandEdgesHz: [Double], sampleRate: Double,
+                             ambientSmoothingHz: Double?)
         -> (full: [Float], bands: [[Float]])? {
         let n = fftLength(for: recording.count + probe.count)
         guard let forward = vDSP.DFT(count: n, direction: .forward,
@@ -483,7 +642,13 @@ public struct SyncProbeCorrelator {
         }
 
         if let ambientNoise, !ambientNoise.isEmpty {
-            let weight = noiseWeights(ambient: ambientNoise, fftLength: n, forward: forward)
+            // A width in hertz means nothing without a sample rate; dividing
+            // by a zero rate would hand `Int` an infinity and trap.
+            let radius = ambientSmoothingHz.flatMap { hz in
+                sampleRate > 0 ? max(1, Int((hz / 2) / (sampleRate / Double(n)))) : nil
+            } ?? min(64, n / 2)
+            let weight = noiseWeights(ambient: ambientNoise, fftLength: n, forward: forward,
+                                      radius: radius)
             for k in 0..<n {
                 crossRe[k] *= weight[k]
                 crossIm[k] *= weight[k]
@@ -524,11 +689,12 @@ public struct SyncProbeCorrelator {
     }
 
     /// Per-bin `1 / (noisePower + ε)` from a probe-free ambient slice: the
-    /// slice's zero-padded periodogram, box-smoothed (a single periodogram's
-    /// per-bin variance is ~100%; averaging ~129 neighbours makes it a usable
-    /// estimate), then regularised so near-silent bins cannot explode.
+    /// slice's zero-padded periodogram, box-smoothed over `radius` bins either
+    /// side (a single periodogram's per-bin variance is ~100%; averaging
+    /// ~129 neighbours makes it a usable estimate), then regularised so
+    /// near-silent bins cannot explode.
     private static func noiseWeights(ambient: [Float], fftLength n: Int,
-                                     forward: vDSP.DFT<Float>) -> [Float] {
+                                     forward: vDSP.DFT<Float>, radius: Int) -> [Float] {
         let zeros = [Float](repeating: 0, count: n)
         let padded = Array(ambient.prefix(n)) + [Float](repeating: 0, count: max(0, n - ambient.count))
         var re = [Float](repeating: 0, count: n)
@@ -538,7 +704,6 @@ public struct SyncProbeCorrelator {
         var power = [Float](repeating: 0, count: n)
         for k in 0..<n { power[k] = re[k] * re[k] + im[k] * im[k] }
 
-        let radius = min(64, n / 2)
         var smoothed = [Float](repeating: 0, count: n)
         var prefix = [Float](repeating: 0, count: n + 1)
         for k in 0..<n { prefix[k + 1] = prefix[k] + power[k] }
@@ -559,8 +724,8 @@ public struct SyncProbeCorrelator {
     /// spectrum raised to `exponent`, inverted, so bands where the probe is
     /// loud stop out-voting bands where it is quiet.
     ///
-    /// Music is the reason this exists. A sweep's magnitude is flat across its
-    /// band, so whitening it changes nothing worth having; a pop mix's power
+    /// Music is the reason this exists. The probe's tilt is deliberate and is
+    /// not whitened away, so the chirp path leaves this at 0; a pop mix's power
     /// sits in the bass, which repeats every 5–25 ms, and the treble that
     /// actually resolves timing sits near the microphone's floor. Whitening
     /// levels the two, at the cost of giving quiet bands — where the room's
