@@ -96,6 +96,14 @@ public enum CompanionCommand: Equatable, Sendable {
     /// whether it worked arrives in the next snapshot's `ConnectionInfo`.
     case submitSpeakerPassword(id: String, password: String)
 
+    /// Sent phone → Mac: the Show in Mixer choice for speaker `id`, one of the
+    /// three `DeviceState.mixerVisibility` strings.
+    case setSpeakerVisibility(id: String, visibility: String)
+
+    /// Sent phone → Mac: forget remembered speakers the Mac can't find; the Mac
+    /// skips any it can see or that a route names.
+    case forgetSpeakers(ids: [String])
+
     /// An unrecognized `"command"` string — e.g. a newer phone talking to an
     /// older Mac. Decodes without throwing so the server can answer with a
     /// failed `commandResult` instead of dropping the connection.
@@ -117,6 +125,7 @@ extension CompanionCommand: Codable {
         case deltaMs
         case key
         case password
+        case visibility, ids
     }
 
     private enum Name: String {
@@ -131,6 +140,7 @@ extension CompanionCommand: Codable {
         case transportPlayPause, transportNext, transportPrevious
         case activateLicenseKey
         case submitSpeakerPassword
+        case setSpeakerVisibility, forgetSpeakers
     }
 
     public init(from decoder: Decoder) throws {
@@ -218,6 +228,13 @@ extension CompanionCommand: Codable {
                 id: try c.decode(String.self, forKey: .id),
                 password: try c.decode(String.self, forKey: .password)
             )
+        case .setSpeakerVisibility:
+            self = .setSpeakerVisibility(
+                id: try c.decode(String.self, forKey: .id),
+                visibility: try c.decode(String.self, forKey: .visibility)
+            )
+        case .forgetSpeakers:
+            self = .forgetSpeakers(ids: try c.decode([String].self, forKey: .ids))
         }
     }
 
@@ -329,6 +346,13 @@ extension CompanionCommand: Codable {
             try c.encode(Name.submitSpeakerPassword.rawValue, forKey: .command)
             try c.encode(id, forKey: .id)
             try c.encode(password, forKey: .password)
+        case .setSpeakerVisibility(let id, let visibility):
+            try c.encode(Name.setSpeakerVisibility.rawValue, forKey: .command)
+            try c.encode(id, forKey: .id)
+            try c.encode(visibility, forKey: .visibility)
+        case .forgetSpeakers(let ids):
+            try c.encode(Name.forgetSpeakers.rawValue, forKey: .command)
+            try c.encode(ids, forKey: .ids)
         case .unknown(let name):
             // Round-trips as whatever it decoded from — re-encoding an
             // `.unknown` just forwards the original unrecognized name with

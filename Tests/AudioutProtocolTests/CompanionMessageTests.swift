@@ -24,7 +24,10 @@ import Testing
                     isMuted: false,
                     isSelected: true,
                     isMainOutMember: true,
-                    connection: DeviceState.ConnectionInfo(state: "connected")
+                    connection: DeviceState.ConnectionInfo(state: "connected"),
+                    mixerVisibility: "always",
+                    isVisibleInMixer: true,
+                    isPlaying: true
                 ),
                 DeviceState(
                     id: "device-2",
@@ -73,6 +76,8 @@ import Testing
             localFallbackActive: false,
             takeoverStatus: "Taking over from another Mac",
             transportAvailable: true,
+            missingSpeakers: [MissingSpeakerState(id: "device-9", name: "Garage", kind: "sonos")],
+            note: NoteState(text: "Audiout isn't your Mac's output device.", severity: "warning"),
             settings: SettingsState(connectVolume: 70, connectVolumeMin: 0, connectVolumeMax: 100, startBufferMs: 200, startBufferOptionsMs: [100, 200, 500])
         )
     }
@@ -206,12 +211,46 @@ import Testing
         #expect(icons[1].png == nil)
     }
 
+    // Renaming a coding key or dropping a field on `Snapshot` or `DeviceState`, `isPlaying` included, turns this red.
     @Test func fullyPopulatedSnapshotRoundTrips() throws {
         let snapshot = Self.fullSnapshot()
         let data = try JSONEncoder().encode(snapshot)
         let reloaded = try JSONDecoder().decode(Snapshot.self, from: data)
         #expect(reloaded == snapshot)
         #expect(reloaded.transportAvailable == true)
+        #expect(reloaded.devices[0].mixerVisibility == "always")
+        #expect(reloaded.devices[0].isVisibleInMixer == true)
+        #expect(reloaded.devices[0].isPlaying == true)
+        #expect(reloaded.missingSpeakers == [MissingSpeakerState(id: "device-9", name: "Garage", kind: "sonos")])
+        #expect(reloaded.note == NoteState(text: "Audiout isn't your Mac's output device.", severity: "warning"))
+    }
+
+    // Renaming a coding key of `missingSpeakers` or `note`, or encoding nil as a null instead of leaving the key out, turns this red.
+    @Test func snapshotWithoutMissingSpeakersAndNoteKeysDecodesAsNotReported() throws {
+        var snapshot = Self.fullSnapshot()
+        snapshot.missingSpeakers = nil
+        snapshot.note = nil
+        let data = try JSONEncoder().encode(snapshot)
+        let json = try #require(String(data: data, encoding: .utf8))
+        #expect(!json.contains("missingSpeakers"))
+        #expect(!json.contains("\"note\""))
+        let reloaded = try JSONDecoder().decode(Snapshot.self, from: data)
+        #expect(reloaded.missingSpeakers == nil)
+        #expect(reloaded.note == nil)
+    }
+
+    // Making `mixerVisibility`, `isVisibleInMixer` or `isPlaying` a required key on `DeviceState` turns this red.
+    @Test func aDeviceWithoutVisibilityOrPlayingKeysDecodesWithAllNil() throws {
+        let json = """
+        {"id": "d1", "name": "Den", "kind": "homePod", "iconSymbolName": "homepod.fill",
+         "isAvailable": true, "supportsAirPlay2": true, "isLocalDevice": false,
+         "volume": 40, "isMuted": false, "isSelected": false, "isMainOutMember": false,
+         "connection": {"state": "connected"}}
+        """
+        let decoded = try JSONDecoder().decode(DeviceState.self, from: Data(json.utf8))
+        #expect(decoded.mixerVisibility == nil)
+        #expect(decoded.isVisibleInMixer == nil)
+        #expect(decoded.isPlaying == nil)
     }
 
     @Test func snapshotWithoutTransportAvailableKeyDecodesAsNotReported() throws {
@@ -371,6 +410,8 @@ import Testing
         .transportPrevious,
         .activateLicenseKey(key: "AUDT-AAAAA-BBBBB-CCCCC-DDDDD"),
         .submitSpeakerPassword(id: "device-2", password: "hunter2"),
+        .setSpeakerVisibility(id: "device-2", visibility: "hideWhenNotInUse"),
+        .forgetSpeakers(ids: ["device-2", "device-3"]),
     ])
     func everyCommandCaseRoundTrips(_ command: CompanionCommand) throws {
         let data = try JSONEncoder().encode(command)
@@ -491,6 +532,24 @@ import Testing
         """
         let command = try JSONDecoder().decode(CompanionCommand.self, from: Data(json.utf8))
         #expect(command == .submitSpeakerPassword(id: "d2", password: "hunter2"))
+    }
+
+    // Renaming the `visibility` coding key or the `setSpeakerVisibility` name turns this red.
+    @Test func setSpeakerVisibilityCommandDecodesFromAHandWrittenWireLiteral() throws {
+        let json = """
+        {"command":"setSpeakerVisibility","id":"d2","visibility":"hideWhenNotInUse"}
+        """
+        let command = try JSONDecoder().decode(CompanionCommand.self, from: Data(json.utf8))
+        #expect(command == .setSpeakerVisibility(id: "d2", visibility: "hideWhenNotInUse"))
+    }
+
+    // Renaming the `ids` coding key or the `forgetSpeakers` name turns this red.
+    @Test func forgetSpeakersCommandDecodesFromAHandWrittenWireLiteral() throws {
+        let json = """
+        {"command":"forgetSpeakers","ids":["d2","d3"]}
+        """
+        let command = try JSONDecoder().decode(CompanionCommand.self, from: Data(json.utf8))
+        #expect(command == .forgetSpeakers(ids: ["d2", "d3"]))
     }
 
     @Test func transportPlayPauseCommandDecodesFromAHandWrittenWireLiteral() throws {
