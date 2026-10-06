@@ -61,7 +61,9 @@ SCORE_MODEL=haiku
 # Any touched path here makes the review full, whatever its size.
 is_risk_path() {
   case "$1" in
-    Sources/AudioutProtocol/* | Sources/ProbeKit/* | Package.swift) return 0 ;;
+    # AudioutField's JSON is read by both apps at run time: a renamed or
+    # removed key breaks them with no compile error here.
+    Sources/AudioutProtocol/* | Sources/ProbeKit/* | Sources/AudioutField/*.json | Package.swift) return 0 ;;
   esac
   return 1
 }

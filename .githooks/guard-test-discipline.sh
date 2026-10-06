@@ -17,10 +17,10 @@
 # people's lines; a clean merge never runs pre-commit at all.
 [ -f "$(git rev-parse --git-dir 2>/dev/null)/MERGE_HEAD" ] && exit 0
 
-files=$(git diff --cached --name-only --diff-filter=AM -- 'Tests/' 2>/dev/null | grep -E '\.swift$')
+files=$(git diff --cached --no-renames --name-only --diff-filter=AM -- 'Tests/' 2>/dev/null | grep -E '\.swift$')
 [ -z "$files" ] && exit 0
 
-new_files=$(git diff --cached --name-only --diff-filter=A -- 'Tests/' 2>/dev/null | grep -E '\.swift$')
+new_files=$(git diff --cached --no-renames --name-only --diff-filter=A -- 'Tests/' 2>/dev/null | grep -E '\.swift$')
 
 hits1=""; hits2=""; hits3=""
 nl='
@@ -29,7 +29,7 @@ for f in $files; do
     content=$(git show ":$f" 2>/dev/null) || continue
 
     # Line numbers (in the staged file) of added lines starting with @Test.
-    added=$(git diff --cached -U0 -- "$f" | awk '
+    added=$(git diff --cached --no-renames -U0 -- "$f" | awk '
         /^@@/ { s = $3; sub(/^\+/, "", s); split(s, p, ","); n = p[1] + 0; r = 0; next }
         /^\+\+\+/ { next }
         /^---/ { next }
@@ -49,7 +49,7 @@ for f in $files; do
         [ "$ok" = y ] || hits1="$hits1$f:$ln$nl"
     done
 
-    p=$(git diff --cached -U0 -- "$f" | grep -E '^\+[[:space:]]*print\(' | grep -v 'print-ok')
+    p=$(git diff --cached --no-renames -U0 -- "$f" | grep -E '^\+[[:space:]]*print\(' | grep -v 'print-ok')
     [ -n "$p" ] && hits2="$hits2$f$nl"
 
     case "$nl$new_files$nl" in
