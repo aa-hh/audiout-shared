@@ -20,8 +20,8 @@ public struct ProbeAnalysis: Sendable, Equatable {
     public let confidence: Double
     /// The smaller of the two lanes' ``SyncProbeCorrelator/Arrival/peakMargin``:
     /// each arrival's height over the strongest rival lag in its own search.
-    /// 1 means a rival matched the winner; the apps refuse below 1.995, which
-    /// is 6 dB.
+    /// 1 means a rival matched the winner; callers refuse below 1.995 (6 dB);
+    /// both apps do.
     public let peakMargin: Double
 }
 

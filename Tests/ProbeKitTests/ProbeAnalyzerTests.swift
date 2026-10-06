@@ -211,6 +211,43 @@ import Testing
                 "and clears the apps' 6 dB rival guard: margin \(analysis.peakMargin)")
     }
 
+    /// Red if the lane the Mac stages (`SyncProbe.lane`: drone gain, glide
+    /// tail, peak normalisation) stops matching the template the analyzer
+    /// correlates against, or the analyzer stops removing the staged spacing.
+    @Test func theStagedLaneItselfReadsBackItsSkew() throws {
+        let rate = Self.rate
+        let lane = SyncProbe.lane(sampleRate: rate)
+        let target = Int(rate * 1.010)   // 10 ms late
+        let reference = Int(rate * (1.0 + Self.spacing))
+        var capture = [Float](repeating: 0, count: Int(rate * 10))
+        for (i, s) in lane.enumerated() {
+            capture[target + i] += 0.5 * s
+            capture[reference + i] += 0.5 * s
+        }
+        let analysis = try ProbeAnalyzer(sampleRate: rate).analyze(recording: capture)
+        #expect(abs(analysis.offsetMs - 10) < 0.1,
+                "the staged lane reads back its 10 ms skew: got \(analysis.offsetMs) ms")
+    }
+
+    /// Red if `searchFromSample` stops keeping the search off the capture
+    /// before it: a louder lane there would win the first search and pair
+    /// with the real target as if it were a lane of this run.
+    @Test func aLouderLaneBeforeTheSearchStartIsIgnored() throws {
+        let rate = Self.rate
+        var capture = renderCapture(sampleRate: rate,
+                                    referenceDelay: rate * (5.0 + Self.spacing),
+                                    skew: rate * 0.020,
+                                    seconds: 14)
+        let decoyStart = Int(rate * 0.2)
+        for (i, s) in SyncProbe.lane(sampleRate: rate).enumerated() {
+            capture[decoyStart + i] += 1.5 * s
+        }
+        let analysis = try ProbeAnalyzer(sampleRate: rate)
+            .analyze(recording: capture, searchFromSample: Int(rate * 4.5))
+        #expect(abs(analysis.offsetMs - 20) < 0.5,
+                "only the pair after the search start is read: got \(analysis.offsetMs) ms")
+    }
+
     // MARK: refusal
 
     @Test func pureNoiseIsRefused() {
@@ -237,6 +274,9 @@ import Testing
         }
     }
 
+    /// Red if the length check goes back to one sweep's length instead of
+    /// `Layout.totalSeconds`: a capture that cannot hold both lanes would be
+    /// searched instead of refused as a setup fault.
     @Test func aCaptureShorterThanTheWholeProbeIsRefused() {
         let short = [Float](repeating: 0,
                             count: Int(Self.rate * SyncProbe.Layout.totalSeconds) - 1)

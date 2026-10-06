@@ -194,7 +194,7 @@ import Testing
 
     @Test func theWrongProbeIsNotMistakenForTheRightOne() {
         // Only the DOWN sweep is in the air; asking for the UP sweep must fail.
-        // This is the orthogonality that lets both speakers play at once.
+        // The matched filter rejects a different glide, whatever the probe is.
         let up = SyncProbe.samples(Self.fastUp())
         let rec = renderScene(length: 8_000, sampleRate: Self.fastRate,
                               probes: [PlacedProbe(design: Self.fastDown(),
@@ -211,6 +211,19 @@ import Testing
         #expect(correlator.arrival(of: up, in: [0.1, 0.2]) == nil,
                 "a recording shorter than the probe cannot contain it")
         #expect(correlator.arrival(of: [], in: up) == nil)
+    }
+
+    /// Red if the ambient smoothing width in hertz is divided by a zero
+    /// sample rate again: `Int(.infinity)` traps the process instead of the
+    /// correlator answering.
+    @Test func aZeroRateWithAnAmbientSliceDoesNotTrap() {
+        let up = SyncProbe.samples(Self.fastUp())
+        let rec = renderScene(length: 8_000, sampleRate: Self.fastRate,
+                              probes: [PlacedProbe(design: Self.fastUp(),
+                                                   delaySamples: 400, gain: 0.8)],
+                              noiseRMS: 0.01)
+        _ = SyncProbeCorrelator(sampleRate: 0)
+            .arrival(of: up, in: rec, ambientNoise: Array(rec[0..<300]))
     }
 
     // MARK: two probes, one recording
@@ -267,9 +280,6 @@ import Testing
                 "the quiet target lane clears the gate: PSR \(lanes.earlier.peakToSidelobe)")
     }
 
-    /// Red if the second lane is searched over the whole correlation again,
-    /// or only on the side after the first arrival: here the louder lane is
-    /// the EARLIER one, so the quiet reference sits after it.
     /// Red if the probe's rival check counts the room's echo of an arrival
     /// (or the arrival's own smear) as a rival: a Sonos Move measured live
     /// with a reflection 22 ms after its arrival only 5 dB down and peaks
@@ -295,6 +305,9 @@ import Testing
                 "an echo 22 ms on and a peak 8 ms on are the arrival's, not rivals: \(lanes.earlier.peakMargin)")
     }
 
+    /// Red if the second lane is searched over the whole correlation again,
+    /// or only on the side after the first arrival: here the louder lane is
+    /// the EARLIER one, so the quiet reference sits after it.
     @Test func theQuietLaneIsFoundBesideALaneTenDecibelsLouder() throws {
         // Target 10 dB louder than the reference this time, arriving 22.79 ms
         // early on top of the staged spacing, each with an echo 100 ms on.

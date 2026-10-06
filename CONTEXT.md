@@ -17,7 +17,7 @@ One AirPlay, Bluetooth, or Chromecast output the Mac can play to.
 _Avoid_: Device, output, endpoint (in user-facing copy)
 
 **Measurement**:
-One run of the sync probe: the Mac plays both sweeps, the iPhone's microphone hears them, and the arrival difference becomes that speaker's offset.
+One run of the sync probe: the Mac plays the same glide on each speaker in turn, the iPhone's microphone hears both, and the arrival difference becomes that speaker's offset.
 _Avoid_: Calibration, probe (user-facing), alignment run
 
 **Offset**:

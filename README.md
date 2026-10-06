@@ -6,8 +6,8 @@ Two products, no dependencies, MIT:
 
 - **`AudioutProtocol`** — the wire protocol between them. Bonjour constants,
   the JSON envelope, the command set, and the state snapshot types.
-- **`ProbeKit`** — the speaker sync-measurement DSP. Sweep synthesis, and the
-  matched filter that recovers how far apart two speakers sounded from a single
+- **`ProbeKit`** — the speaker sync-measurement DSP. Synthesis of the glide
+  both speakers play in turn, and the matched filter that recovers how far apart two speakers sounded from a single
   microphone recording of both.
 
 It is its own repository because SwiftPM cannot depend on a package that lives

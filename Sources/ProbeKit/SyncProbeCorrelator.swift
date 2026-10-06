@@ -102,9 +102,9 @@ public enum SyncProbe {
         /// start. The Bluetooth lane plays first.
         public static let laneSpacingSeconds = 4.5
         public static let totalSeconds = laneSpacingSeconds + laneSeconds
-        /// The other lane is searched 4.5 ± 1.5 s from the first one found.
-        /// 1.5 keeps the glide's own partial copies, 1.75 s (−18 dB) and
-        /// 2.77 s (−32 dB) from every real arrival, out of that window.
+        /// The plausible skew between the two speakers. The second lane is
+        /// searched only ``laneSpacingSeconds`` ± this from the first one
+        /// found, so nothing else in the correlation can be read as it.
         /// razor: deliberate ceiling; raise it only together with a wider gap
         /// between the glides.
         public static let maxSkewSeconds = 1.5
@@ -232,11 +232,13 @@ public enum SyncProbe {
 /// segment (a lead-in slice of the same recording, before the probes start),
 /// correlation bins are divided by the measured noise power spectrum, so a
 /// tonal interferer (a hum, a voice) is discounted instead of being whitened
-/// up to equal vote. The chirp path adds no whitening on top of that: a
-/// sweep's magnitude is already flat across its band, so dividing by it buys
-/// nothing and throws away per-band SNR, which is exactly the information a
-/// noisy party room needs (the 2026 TDOA-probing result: trained estimators
-/// learn magnitude-aware weighting and never learn PHAT).
+/// up to equal vote. The chirp path adds no whitening on top of that. The
+/// probe's −4 dB/octave tilt is deliberate (it keeps the glide low and
+/// pleasant), and dividing by the probe's magnitude would undo it inside the
+/// filter, lifting the faint top to a full vote and throwing away per-band
+/// SNR, which is exactly the information a noisy party room needs (the 2026
+/// TDOA-probing result: trained estimators learn magnitude-aware weighting and
+/// never learn PHAT).
 ///
 /// ``correlate(recording:probe:ambientNoise:whiteningExponent:sampleRate:)`` does take a
 /// whitening exponent, defaulted to 0 so every chirp caller keeps the filter
@@ -342,21 +344,18 @@ public struct SyncProbeCorrelator {
         /// against. Infinity when the neighbourhood holds too few lags to
         /// summarise.
         public var localScore: Double
-        /// Peak height over the highest rival lag inside the searched range:
-        /// the best lag more than ``SyncProbeCorrelator/peakMarginSeparationSeconds``
-        /// away from this one. 1 means the runner-up matched the winner;
-        /// infinity when there is no positive rival at all.
+        /// Peak height over the highest rival lag inside the searched range.
+        /// 1 means the runner-up matched the winner; infinity when there is no
+        /// positive rival at all. Two readings of "rival":
+        /// ``SyncProbeCorrelator/arrival(of:in:ambientNoise:)`` takes the best
+        /// lag more than ``SyncProbeCorrelator/peakMarginSeparationSeconds``
+        /// away on either side. The probe path
+        /// (``SyncProbeCorrelator/laneArrivals(of:in:ambientNoise:searchFrom:laneSpacingSeconds:maxSkewSeconds:)``)
+        /// skips ``SyncProbeCorrelator/probeMarginSeparationSeconds`` before
+        /// the peak and the whole ``SyncProbeCorrelator/reverbShadowSeconds``
+        /// after it, so the arrival's own smear and the room's echoes of it
+        /// are not counted.
         public var peakMargin: Double
-    }
-
-    /// Two arrivals from one recording, reduced to the number the sync engine
-    /// wants.
-    public struct Measurement: Equatable {
-        /// Arrival of `probeB` minus arrival of `probeA`, seconds. Positive
-        /// means B sounded later.
-        public var offsetSeconds: Double
-        public var arrivalA: Arrival
-        public var arrivalB: Arrival
     }
 
     /// Finds `probe` in `recording`, or nil when no convincing peak exists.
@@ -496,8 +495,8 @@ public struct SyncProbeCorrelator {
     /// first, anywhere. The other is searched only `laneSpacingSeconds ±
     /// maxSkewSeconds` away from it, on either side, because the staging
     /// fixes that spacing and nothing else in the correlation can be trusted
-    /// to stay out of the way: room echoes and any harmonic in the template
-    /// put weaker copies of an arrival at fixed distances from it. Each arrival ignores the
+    /// to stay out of the way: room reflections put weaker copies of an
+    /// arrival at fixed distances from it. Each arrival ignores the
     /// other's neighbourhood (``reverbShadowSeconds``) when it measures
     /// ``Arrival/peakMargin``, so the margin is about rivals, not about the
     /// other speaker.
@@ -643,8 +642,10 @@ public struct SyncProbeCorrelator {
         }
 
         if let ambientNoise, !ambientNoise.isEmpty {
-            let radius = ambientSmoothingHz.map {
-                max(1, Int(($0 / 2) / (sampleRate / Double(n))))
+            // A width in hertz means nothing without a sample rate; dividing
+            // by a zero rate would hand `Int` an infinity and trap.
+            let radius = ambientSmoothingHz.flatMap { hz in
+                sampleRate > 0 ? max(1, Int((hz / 2) / (sampleRate / Double(n)))) : nil
             } ?? min(64, n / 2)
             let weight = noiseWeights(ambient: ambientNoise, fftLength: n, forward: forward,
                                       radius: radius)
@@ -723,8 +724,8 @@ public struct SyncProbeCorrelator {
     /// spectrum raised to `exponent`, inverted, so bands where the probe is
     /// loud stop out-voting bands where it is quiet.
     ///
-    /// Music is the reason this exists. A sweep's magnitude is flat across its
-    /// band, so whitening it changes nothing worth having; a pop mix's power
+    /// Music is the reason this exists. The probe's tilt is deliberate and is
+    /// not whitened away, so the chirp path leaves this at 0; a pop mix's power
     /// sits in the bass, which repeats every 5–25 ms, and the treble that
     /// actually resolves timing sits near the microphone's floor. Whitening
     /// levels the two, at the cost of giving quiet bands — where the room's
