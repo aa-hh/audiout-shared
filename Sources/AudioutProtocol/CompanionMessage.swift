@@ -56,7 +56,10 @@ public enum CompanionMessage: Equatable, Sendable {
     /// The two moments `ProbeSession` is built to be told about: sweeps
     /// entered the feed, and the last sweep frame entered it. Sent only to
     /// the client that staged the probe (`CompanionCommand.startAlignmentProbe`).
-    case alignmentProbeStarted(deviceID: String)
+    /// `roomDelaySeconds` is the slowest participating speaker's output delay
+    /// in seconds, how long the probe's sound lags the feed, so the phone can
+    /// place each speaker's turn; absent from a Mac that predates the field.
+    case alignmentProbeStarted(deviceID: String, roomDelaySeconds: Double? = nil)
     /// See `alignmentProbeStarted` — the matching "last sweep frame entered
     /// the feed" moment.
     case alignmentProbeFinished(deviceID: String)
@@ -179,6 +182,7 @@ extension CompanionEnvelope: Codable {
         case page, pageCount, icons
         case deviceID
         case measuredMs, correctedMs, source
+        case roomDelaySeconds
     }
 
     private enum TypeName: String {
@@ -238,7 +242,10 @@ extension CompanionEnvelope: Codable {
                 icons: try payload.decode([AppIconPayload].self, forKey: .icons)
             )
         case .alignmentProbeStarted:
-            message = .alignmentProbeStarted(deviceID: try payload.decode(String.self, forKey: .deviceID))
+            message = .alignmentProbeStarted(
+                deviceID: try payload.decode(String.self, forKey: .deviceID),
+                roomDelaySeconds: try payload.decodeIfPresent(Double.self, forKey: .roomDelaySeconds)
+            )
         case .alignmentProbeFinished:
             message = .alignmentProbeFinished(deviceID: try payload.decode(String.self, forKey: .deviceID))
         case .alignmentApplied:
@@ -302,10 +309,11 @@ extension CompanionEnvelope: Codable {
             try payload.encode(page, forKey: .page)
             try payload.encode(pageCount, forKey: .pageCount)
             try payload.encode(icons, forKey: .icons)
-        case .alignmentProbeStarted(let deviceID):
+        case .alignmentProbeStarted(let deviceID, let roomDelaySeconds):
             try c.encode(TypeName.alignmentProbeStarted.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(deviceID, forKey: .deviceID)
+            try payload.encodeIfPresent(roomDelaySeconds, forKey: .roomDelaySeconds)
         case .alignmentProbeFinished(let deviceID):
             try c.encode(TypeName.alignmentProbeFinished.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)

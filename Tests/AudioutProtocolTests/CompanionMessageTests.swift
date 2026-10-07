@@ -167,9 +167,22 @@ import Testing
         #expect(try roundTrip(message) == message)
     }
 
+    // Turns red if `roomDelaySeconds` stops being encoded or decoded in `alignmentProbeStarted`.
     @Test func alignmentProbeStartedRoundTrips() throws {
-        let message = CompanionMessage.alignmentProbeStarted(deviceID: "device-2")
-        #expect(try roundTrip(message) == message)
+        let message = CompanionMessage.alignmentProbeStarted(deviceID: "device-2", roomDelaySeconds: 2.0)
+        let decoded = try roundTrip(message)
+        #expect(decoded == message)
+        guard case .alignmentProbeStarted(_, let delay) = decoded else { Issue.record("wrong case"); return }
+        #expect(delay == 2.0)
+    }
+
+    // Turns red if `roomDelaySeconds` becomes a required key, which would drop a 0.21.0 Mac's message.
+    @Test func alignmentProbeStartedWithoutRoomDelayDecodesAsNil() throws {
+        let json = """
+        {"v": 1, "type": "alignmentProbeStarted", "payload": {"deviceID": "device-2"}}
+        """
+        let decoded = try CompanionEnvelope.decode(Data(json.utf8))
+        #expect(decoded.message == .alignmentProbeStarted(deviceID: "device-2", roomDelaySeconds: nil))
     }
 
     @Test func alignmentProbeFinishedRoundTrips() throws {
