@@ -342,6 +342,24 @@ import Testing
         #expect(alignment.status == "tuned")
     }
 
+    /// Turns red if `delayMs` stops being encoded or decoded on `AlignmentState`.
+    @Test func alignmentStateDelayMsRoundTrips() throws {
+        let alignment = DeviceState.AlignmentState(status: "tuned", delayMs: 286)
+        let data = try JSONEncoder().encode(alignment)
+        let reloaded = try JSONDecoder().decode(DeviceState.AlignmentState.self, from: data)
+        #expect(reloaded == alignment)
+        #expect(reloaded.delayMs == 286)
+    }
+
+    /// Turns red if `delayMs` becomes a required key, which would break a snapshot from a 0.22.0 Mac.
+    @Test func alignmentStateWithoutDelayMsKeyDecodesAsNil() throws {
+        let json = """
+        {"status": "tuned", "referenceID": "device-1", "clockState": "steady", "source": "measured"}
+        """
+        let alignment = try JSONDecoder().decode(DeviceState.AlignmentState.self, from: Data(json.utf8))
+        #expect(alignment.delayMs == nil)
+    }
+
     @Test func deviceStateWithNilAlignmentRoundTrips() throws {
         let device = DeviceState(
             id: "device-1",
