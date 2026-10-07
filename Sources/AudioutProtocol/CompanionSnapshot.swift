@@ -105,9 +105,10 @@ public struct DeviceState: Codable, Equatable, Sendable {
         public var source: String?
         /// The speaker's current total delay setting in whole milliseconds,
         /// the same number the Mac shows on the speaker's row (its stored
-        /// latency trim). `nil` when the speaker has none set or the Mac
+        /// latency trim), not the gap one run measured (that is `offsetMs` on
+        /// `reportAlignmentMeasurement`). `nil` when the speaker has none set or the Mac
         /// predates this field.
-        public var offsetMs: Int?
+        public var delayMs: Int?
 
         public init(
             status: String,
@@ -116,7 +117,7 @@ public struct DeviceState: Codable, Equatable, Sendable {
             settleRemainingSeconds: Int? = nil,
             clockState: String? = nil,
             source: String? = nil,
-            offsetMs: Int? = nil
+            delayMs: Int? = nil
         ) {
             self.status = status
             self.staleReason = staleReason
@@ -124,7 +125,7 @@ public struct DeviceState: Codable, Equatable, Sendable {
             self.settleRemainingSeconds = settleRemainingSeconds
             self.clockState = clockState
             self.source = source
-            self.offsetMs = offsetMs
+            self.delayMs = delayMs
         }
     }
 
