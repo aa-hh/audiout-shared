@@ -19,17 +19,18 @@ question's own answer — and the Settings "Share usage data" switch changes the
 answer later, either way. A phone that only ever enters demo mode is never
 asked and so never reports. Debug builds of the phone never start the SDK, so
 nothing a developer or a test run does reports. Every phone event sent while
-demo mode is active carries `demo: true`. The Mac is opt-out, but
-only through the free trial: analytics are on from first launch, with a
-Settings switch to turn them off that sticks once flipped. A paid user is
-asked once — a direct buyer sees the onboarding usage-stats card, a trial
-converter sees a one-time popover right after their paid key is accepted —
-and declining stops future collection, though whatever the trial already sent
-stays. Ruling: owner, 2026-09-12. A joined report that lines up a Mac and a
-phone by `mac_id` only fails to find a match for a paid user who declined
-that one-time ask, a Mac whose owner turned the Settings switch off during
-the trial, a phone that connected before any Mac analytics fired, or a phone
-whose owner declined the usage-data question or has not been asked it yet.
+demo mode is active carries `demo: true`. The Mac is opt-out, but only through
+the free trial: analytics are on from first launch, with a Settings switch to
+turn them off that sticks once flipped. A paid user is asked once — a direct
+buyer sees the onboarding usage-stats card, a trial converter sees a one-time
+popover right after their paid key is accepted — and declining stops future
+collection, though whatever the trial already sent stays. Rulings: owner,
+2026-09-12 for the Mac, 2026-10-14 for the phone. A joined report that lines
+up a Mac and a phone by `mac_id` only fails to find a match for a paid user
+who declined that one-time ask, a Mac whose owner turned the Settings switch
+off during the trial, a phone that connected before any Mac analytics fired,
+or a phone whose owner declined the usage-data question or has not been asked
+it yet.
 
 `mac_id` is the join key between a Mac and the phones connected to it. It is
 the value the Mac sends as `serverID` in its `welcome` message when a phone
@@ -200,7 +201,7 @@ Logs view by `service.name` first.
 Instead of logs, the Mac app sends the failures a user felt to PostHog error
 tracking, as `$exception` events. Same gate as every Mac event: the "Share
 anonymous usage statistics" opt-in, off by default. The exception type is one
-of the eight names below, each written into the Mac's source as a literal, so no
+of the names below, each written into the Mac's source as a literal, so no
 runtime value can become an exception's identity. Only the properties listed
 here leave the Mac; the speaker id, the file path and the raw error text stay
 in the local log. That type is the only locator a report carries; the matching
@@ -223,6 +224,7 @@ of its own.
 | `bt:connect_failed` | `reason` | `timeout`, `no_audio_endpoint`, or a Bluetooth status code as `0x` hex | A Bluetooth speaker fails to connect. |
 | `bt_sink:dead` | `reason` | `device_gone`, `device_gone_at_start`, `render_stalled` | A Bluetooth speaker's sink found its device gone or its render callback stalled and tore itself down. |
 | `bt_volume:hardware_write_failed` | — | — | Setting a Bluetooth speaker's own volume fails, so that speaker's slider goes back to scaling the sound on the Mac for the rest of the session. The speaker id stays local. |
+| `companion:identity_load_failed` | — | — | The Mac cannot load or create the TLS identity the iPhone link needs, so the companion server stays stopped and "Pair an iPhone" does nothing. The error and OSStatus stay local. |
 | `bt_volume:store_write_failed` | — | — | The "Control speaker volume" choices cannot be saved to disk. The choice still holds for the session. The error text stays local, because it can carry a file path. |
 
 ## Notes on shared properties

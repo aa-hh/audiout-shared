@@ -70,10 +70,14 @@ share had to become a repository of its own.
 - **Bump `CompanionProto.version` only when a case's SEMANTICS change** in a way
   an old peer would misinterpret — not merely for a new case, which `.unknown`
   already absorbs.
-- **Refuse-forward, not refuse-behind.** A peer advertising a version greater
-  than `CompanionProto.version` is refused; an older peer is fine to talk to.
+- **Refuse forward and refuse below the floor.** A peer advertising a version
+  greater than `CompanionProto.version` is refused; so is one older than
+  `CompanionProto.minimumPeerVersion`; anything in between is fine to talk to.
   This runs twice: on the Bonjour TXT `proto` key before a socket opens, and
   again on `hello`/`welcome`'s `protoVersion` once connected.
+- **`CompanionPairing` is the only source of handshake bytes** (client id,
+  nonce signature input, pairing code, instance name); the Mac and the phone
+  call it, never retype it.
 - **Icons ride OUTSIDE `Snapshot` on purpose.** `AppIconPayload` /
   `CompanionAppIcons` are their own request/response pair, bounded by a page
   size and a request cap, precisely so that the server's identical-snapshot
