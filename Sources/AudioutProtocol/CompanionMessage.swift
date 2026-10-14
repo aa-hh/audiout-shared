@@ -35,7 +35,9 @@ public enum CompanionMessage: Equatable, Sendable {
     /// code anyway, so the user has something to compare against. It only
     /// ever adds a screen on the Mac: the phone keeps its own check whatever
     /// the Mac does. Absent decodes as `false`, so a phone built against an
-    /// older tag reads as not checking.
+    /// older tag reads as not checking, and an older Mac ignores the key: the
+    /// optional-key exception to "never change an existing case's encoding"
+    /// in AGENTS.md.
     case hello(clientKey: String, clientName: String, protoVersion: Int, signature: String,
                checksPairingCode: Bool = false)
     case command(requestID: String, command: CompanionCommand)
