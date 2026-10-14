@@ -20,10 +20,12 @@ launch, with a Settings switch to turn them off that sticks once flipped. A
 paid user is asked once — a direct buyer sees the onboarding usage-stats
 card, a trial converter sees a one-time popover right after their paid key is
 accepted — and declining stops future collection, though whatever the trial
-already sent stays. Ruling: owner, 2026-09-12. A joined report that lines up
-a Mac and a phone by `mac_id` only fails to find a match for a paid user who
-declined that one-time ask, a Mac whose owner turned the Settings switch off
-during the trial, or a phone that connected before any Mac analytics fired.
+already sent stays. Rulings: owner, 2026-09-12 for the Mac, 2026-10-14 for
+the phone. A joined report that lines up a Mac and a phone by `mac_id` only
+fails to find a match for a paid user who declined that one-time ask, a Mac
+whose owner turned the Settings switch off during the trial, a phone whose
+user declined or has not yet answered its ask, or a phone that connected
+before any Mac analytics fired.
 
 `mac_id` is the join key between a Mac and the phones connected to it. It is
 the value the Mac sends as `serverID` in its `welcome` message when a phone
