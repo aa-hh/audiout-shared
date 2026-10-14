@@ -82,6 +82,15 @@ import Testing
         )
     }
 
+    // The message type does no crypto, so any 64-byte values stand in for a
+    // key and a signature here.
+    // `head -c 64 /dev/zero | tr '\0' '\004' | base64 -w0`
+    private static let clientKey = "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBA=="
+    // `head -c 64 /dev/zero | tr '\0' '\005' | base64 -w0`
+    private static let signature = "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQ=="
+    // `head -c 32 /dev/zero | tr '\0' '\001' | base64 -w0`
+    private static let nonce = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+
     private func roundTrip(_ message: CompanionMessage) throws -> CompanionMessage {
         let envelope = CompanionEnvelope(message: message)
         let data = try envelope.encoded()
@@ -92,22 +101,32 @@ import Testing
 
     @Test func helloRoundTrips() throws {
         let message = CompanionMessage.hello(
-            clientID: "2B5E5A2B-58D8-4979-9F41-92E668FD9C0A",
+            clientKey: Self.clientKey,
             clientName: "Alec's iPhone",
-            protoVersion: 1)
+            protoVersion: 2,
+            signature: Self.signature)
         #expect(try roundTrip(message) == message)
     }
 
-    /// A hello with NO clientID key (a hand-rolled or pre-T24 client) must
-    /// decode — as `clientID: ""` — rather than throw, so the server can
-    /// refuse it with `CompanionGoodbyeReason.invalidClientID` instead of
+    /// A hello with NO clientKey or signature key (a hand-rolled client) must
+    /// decode — as `""` for each — rather than throw, so the server can
+    /// refuse it with `CompanionGoodbyeReason.invalidClientKey` instead of
     /// closing it as malformed.
-    @Test func helloWithoutClientIDDecodesAsEmptyClientID() throws {
+    // Turns red if the hello decoder reads `clientKey` or `signature` with
+    // `decode` instead of `decodeIfPresent ?? ""`.
+    @Test func helloWithoutKeyOrSignatureDecodesAsEmptyStrings() throws {
         let json = """
-        {"v": 1, "type": "hello", "payload": {"clientName": "iPhone", "protoVersion": 1}}
+        {"v": 2, "type": "hello", "payload": {"clientName": "iPhone", "protoVersion": 2}}
         """
         let envelope = try CompanionEnvelope.decode(Data(json.utf8))
-        #expect(envelope.message == .hello(clientID: "", clientName: "iPhone", protoVersion: 1))
+        #expect(envelope.message == .hello(clientKey: "", clientName: "iPhone", protoVersion: 2, signature: ""))
+    }
+
+    // Turns red if the `challenge` case is dropped from the encoder or the
+    // decoder, or its payload key changes on one side only.
+    @Test func challengeRoundTrips() throws {
+        let message = CompanionMessage.challenge(nonce: Self.nonce)
+        #expect(try roundTrip(message) == message)
     }
 
     @Test func awaitingApprovalRoundTrips() throws {
@@ -179,7 +198,7 @@ import Testing
     // Turns red if `roomDelaySeconds` becomes a required key, which would drop a 0.21.0 Mac's message.
     @Test func alignmentProbeStartedWithoutRoomDelayDecodesAsNil() throws {
         let json = """
-        {"v": 1, "type": "alignmentProbeStarted", "payload": {"deviceID": "device-2"}}
+        {"v": 2, "type": "alignmentProbeStarted", "payload": {"deviceID": "device-2"}}
         """
         let decoded = try CompanionEnvelope.decode(Data(json.utf8))
         #expect(decoded.message == .alignmentProbeStarted(deviceID: "device-2", roomDelaySeconds: nil))
@@ -454,7 +473,7 @@ import Testing
 
     @Test func unknownEnvelopeTypeDecodesWithoutThrowing() throws {
         let json = """
-        {"v": 1, "type": "futureMessageType", "payload": {"someField": 42}}
+        {"v": 2, "type": "futureMessageType", "payload": {"someField": 42}}
         """
         let envelope = try CompanionEnvelope.decode(Data(json.utf8))
         #expect(envelope.message == .unknown(type: "futureMessageType"))
@@ -472,10 +491,10 @@ import Testing
 
     @Test func decodingIgnoresUnknownExtraKeysInPayload() throws {
         let json = """
-        {"v": 1, "type": "hello", "payload": {"clientID": "2B5E5A2B-58D8-4979-9F41-92E668FD9C0A", "clientName": "iPhone", "protoVersion": 1, "somethingNewAndUnexpected": true}}
+        {"v": 2, "type": "hello", "payload": {"clientKey": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBA==", "clientName": "iPhone", "protoVersion": 2, "signature": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQ==", "somethingNewAndUnexpected": true}}
         """
         let envelope = try CompanionEnvelope.decode(Data(json.utf8))
-        #expect(envelope.message == .hello(clientID: "2B5E5A2B-58D8-4979-9F41-92E668FD9C0A", clientName: "iPhone", protoVersion: 1))
+        #expect(envelope.message == .hello(clientKey: Self.clientKey, clientName: "iPhone", protoVersion: 2, signature: Self.signature))
     }
 
     @Test func decodingIgnoresUnknownExtraKeysInCommand() throws {
@@ -492,9 +511,15 @@ import Testing
         #expect(CompanionProto.isIncompatible(peerVersion: CompanionProto.version + 1))
     }
 
-    @Test func refuseForwardAcceptsAPeerOnAnOlderOrEqualVersion() {
+    // Turns red if `isIncompatible` refuses a peer on exactly our version.
+    @Test func aPeerOnTheSameVersionIsAccepted() {
         #expect(!CompanionProto.isIncompatible(peerVersion: CompanionProto.version))
-        #expect(!CompanionProto.isIncompatible(peerVersion: max(0, CompanionProto.version - 1)))
+    }
+
+    // Turns red if `isIncompatible` stops refusing a peer older than
+    // `minimumPeerVersion`, which speaks the version 1 handshake.
+    @Test func aPeerBelowTheMinimumVersionIsRefused() {
+        #expect(CompanionProto.isIncompatible(peerVersion: CompanionProto.minimumPeerVersion - 1))
     }
 
     /// Client-side direction: the phone receives `welcome` and checks the
@@ -512,9 +537,9 @@ import Testing
     /// Server-side direction: the Mac receives `hello` and checks the
     /// phone's `protoVersion`.
     @Test func serverRefusesAHelloAdvertisingANewerProtoVersion() throws {
-        let envelope = CompanionEnvelope(message: .hello(clientID: "2B5E5A2B-58D8-4979-9F41-92E668FD9C0A", clientName: "iPhone", protoVersion: CompanionProto.version + 1))
+        let envelope = CompanionEnvelope(message: .hello(clientKey: Self.clientKey, clientName: "iPhone", protoVersion: CompanionProto.version + 1, signature: Self.signature))
         let decoded = try CompanionEnvelope.decode(envelope.encoded())
-        guard case .hello(_, _, let protoVersion) = decoded.message else {
+        guard case .hello(_, _, let protoVersion, _) = decoded.message else {
             Issue.record("expected .hello")
             return
         }
@@ -525,16 +550,26 @@ import Testing
 
     @Test func helloDecodesFromAHandWrittenWireLiteral() throws {
         let json = """
-        {"v": 1, "type": "hello", "payload": {"clientID": "2B5E5A2B-58D8-4979-9F41-92E668FD9C0A", "clientName": "Alec's iPhone", "protoVersion": 1}}
+        {"v": 2, "type": "hello", "payload": {"clientKey": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBA==", "clientName": "Alec's iPhone", "protoVersion": 2, "signature": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQ=="}}
         """
         let envelope = try CompanionEnvelope.decode(Data(json.utf8))
-        #expect(envelope.v == 1)
-        #expect(envelope.message == .hello(clientID: "2B5E5A2B-58D8-4979-9F41-92E668FD9C0A", clientName: "Alec's iPhone", protoVersion: 1))
+        #expect(envelope.v == 2)
+        #expect(envelope.message == .hello(clientKey: Self.clientKey, clientName: "Alec's iPhone", protoVersion: 2, signature: Self.signature))
+    }
+
+    // Turns red if the `challenge` type name or its `nonce` payload key is
+    // renamed.
+    @Test func challengeDecodesFromAHandWrittenWireLiteral() throws {
+        let json = """
+        {"v": 2, "type": "challenge", "payload": {"nonce": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="}}
+        """
+        let envelope = try CompanionEnvelope.decode(Data(json.utf8))
+        #expect(envelope.message == .challenge(nonce: Self.nonce))
     }
 
     @Test func awaitingApprovalDecodesFromAHandWrittenWireLiteral() throws {
         let json = """
-        {"v": 1, "type": "awaitingApproval", "payload": {}}
+        {"v": 2, "type": "awaitingApproval", "payload": {}}
         """
         let envelope = try CompanionEnvelope.decode(Data(json.utf8))
         #expect(envelope.message == .awaitingApproval)
@@ -542,7 +577,7 @@ import Testing
 
     @Test func setDeviceSelectedCommandDecodesFromAHandWrittenWireLiteral() throws {
         let json = """
-        {"v": 1, "type": "command", "payload": {"requestID": "req-1", "command": {"command": "setDeviceSelected", "id": "device-1", "selected": true}}}
+        {"v": 2, "type": "command", "payload": {"requestID": "req-1", "command": {"command": "setDeviceSelected", "id": "device-1", "selected": true}}}
         """
         let envelope = try CompanionEnvelope.decode(Data(json.utf8))
         #expect(envelope.message == .command(requestID: "req-1", command: .setDeviceSelected(id: "device-1", selected: true)))
@@ -593,7 +628,7 @@ import Testing
 
     @Test func welcomeDecodesFromAHandWrittenWireLiteral() throws {
         let json = """
-        {"v": 1, "type": "welcome", "payload": {"serverName": "Alec's Mac", "protoVersion": 1, "snapshot": {
+        {"v": 2, "type": "welcome", "payload": {"serverName": "Alec's Mac", "protoVersion": 1, "snapshot": {
             "serverName": "Alec's Mac",
             "devices": [],
             "mainOut": {"kind": "selected"},

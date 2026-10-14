@@ -12,17 +12,18 @@ defined in `CONTEXT.md` in this repository — that glossary is the single
 place those words are defined; this file only says which property carries
 which one.
 
-Consent differs by app and is not symmetric. The phone is opt-out: analytics
-are on by default, with a switch to turn them off. The Mac is opt-out too, but
-only through the free trial: analytics are on from first launch, with a
-Settings switch to turn them off that sticks once flipped. A paid user is
-asked once — a direct buyer sees the onboarding usage-stats card, a trial
-converter sees a one-time popover right after their paid key is accepted —
-and declining stops future collection, though whatever the trial already sent
-stays. Ruling: owner, 2026-09-12. A joined report that lines up a Mac and a
-phone by `mac_id` only fails to find a match for a paid user who declined
-that one-time ask, a Mac whose owner turned the Settings switch off during
-the trial, or a phone that connected before any Mac analytics fired.
+Consent differs by app and is not symmetric. The phone is opt-in: analytics
+are off until the user answers a one-time ask shown after the first
+successful connection, and the Settings switch changes it afterwards. The Mac
+is opt-out, but only through the free trial: analytics are on from first
+launch, with a Settings switch to turn them off that sticks once flipped. A
+paid user is asked once — a direct buyer sees the onboarding usage-stats
+card, a trial converter sees a one-time popover right after their paid key is
+accepted — and declining stops future collection, though whatever the trial
+already sent stays. Ruling: owner, 2026-09-12. A joined report that lines up
+a Mac and a phone by `mac_id` only fails to find a match for a paid user who
+declined that one-time ask, a Mac whose owner turned the Settings switch off
+during the trial, or a phone that connected before any Mac analytics fired.
 
 `mac_id` is the join key between a Mac and the phones connected to it. It is
 the value the Mac sends as `serverID` in its `welcome` message when a phone
