@@ -28,7 +28,16 @@ public enum CompanionMessage: Equatable, Sendable {
     /// or `signature` key decodes as `""` (see `CompanionEnvelope`'s
     /// decoder) so the server can refuse it with a reason instead of
     /// dropping the frame as malformed.
-    case hello(clientKey: String, clientName: String, protoVersion: Int, signature: String)
+    ///
+    /// `checksPairingCode` is true when the phone is asking its user to
+    /// confirm the pairing code (`CompanionPairing.pairingCode`) because it
+    /// does not know this Mac. A Mac that already approved the phone shows the
+    /// code anyway, so the user has something to compare against. It only
+    /// ever adds a screen on the Mac: the phone keeps its own check whatever
+    /// the Mac does. Absent decodes as `false`, so a phone built against an
+    /// older tag reads as not checking.
+    case hello(clientKey: String, clientName: String, protoVersion: Int, signature: String,
+               checksPairingCode: Bool = false)
     case command(requestID: String, command: CompanionCommand)
 
     // server -> client
@@ -194,7 +203,7 @@ extension CompanionEnvelope: Codable {
     }
 
     private enum PayloadKeys: String, CodingKey {
-        case clientKey, clientName, protoVersion, signature
+        case clientKey, clientName, protoVersion, signature, checksPairingCode
         case nonce
         case requestID, command
         case serverName, snapshot, companionToken, serverID
@@ -230,7 +239,8 @@ extension CompanionEnvelope: Codable {
                 clientKey: try payload.decodeIfPresent(String.self, forKey: .clientKey) ?? "",
                 clientName: try payload.decode(String.self, forKey: .clientName),
                 protoVersion: try payload.decode(Int.self, forKey: .protoVersion),
-                signature: try payload.decodeIfPresent(String.self, forKey: .signature) ?? ""
+                signature: try payload.decodeIfPresent(String.self, forKey: .signature) ?? "",
+                checksPairingCode: try payload.decodeIfPresent(Bool.self, forKey: .checksPairingCode) ?? false
             )
         case .command:
             message = .command(
@@ -289,13 +299,14 @@ extension CompanionEnvelope: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(v, forKey: .v)
         switch message {
-        case .hello(let clientKey, let clientName, let protoVersion, let signature):
+        case .hello(let clientKey, let clientName, let protoVersion, let signature, let checksPairingCode):
             try c.encode(TypeName.hello.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(clientKey, forKey: .clientKey)
             try payload.encode(clientName, forKey: .clientName)
             try payload.encode(protoVersion, forKey: .protoVersion)
             try payload.encode(signature, forKey: .signature)
+            try payload.encode(checksPairingCode, forKey: .checksPairingCode)
         case .command(let requestID, let command):
             try c.encode(TypeName.command.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
