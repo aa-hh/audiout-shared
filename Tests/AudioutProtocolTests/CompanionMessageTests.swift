@@ -27,7 +27,8 @@ import Testing
                     connection: DeviceState.ConnectionInfo(state: "connected"),
                     mixerVisibility: "always",
                     isVisibleInMixer: true,
-                    isPlaying: true
+                    isPlaying: true,
+                    model: "AudioAccessory5,1"
                 ),
                 DeviceState(
                     id: "device-2",
@@ -224,7 +225,7 @@ import Testing
         #expect(icons[1].png == nil)
     }
 
-    // Renaming a coding key or dropping a field on `Snapshot` or `DeviceState`, `isPlaying` included, turns this red.
+    // Renaming a coding key or dropping a field on `Snapshot` or `DeviceState`, `isPlaying` and `model` included, turns this red.
     @Test func fullyPopulatedSnapshotRoundTrips() throws {
         let snapshot = Self.fullSnapshot()
         let data = try JSONEncoder().encode(snapshot)
@@ -234,6 +235,7 @@ import Testing
         #expect(reloaded.devices[0].mixerVisibility == "always")
         #expect(reloaded.devices[0].isVisibleInMixer == true)
         #expect(reloaded.devices[0].isPlaying == true)
+        #expect(reloaded.devices[0].model == "AudioAccessory5,1")
         #expect(reloaded.missingSpeakers == [MissingSpeakerState(id: "device-9", name: "Garage", kind: "sonos")])
         #expect(reloaded.note == NoteState(text: "Audiout isn't your Mac's output device.", severity: "warning"))
     }
@@ -252,7 +254,7 @@ import Testing
         #expect(reloaded.note == nil)
     }
 
-    // Making `mixerVisibility`, `isVisibleInMixer` or `isPlaying` a required key on `DeviceState` turns this red.
+    // Making `mixerVisibility`, `isVisibleInMixer`, `isPlaying` or `model` a required key on `DeviceState` turns this red.
     @Test func aDeviceWithoutVisibilityOrPlayingKeysDecodesWithAllNil() throws {
         let json = """
         {"id": "d1", "name": "Den", "kind": "homePod", "iconSymbolName": "homepod.fill",
@@ -264,6 +266,7 @@ import Testing
         #expect(decoded.mixerVisibility == nil)
         #expect(decoded.isVisibleInMixer == nil)
         #expect(decoded.isPlaying == nil)
+        #expect(decoded.model == nil)
     }
 
     @Test func snapshotWithoutTransportAvailableKeyDecodesAsNotReported() throws {
