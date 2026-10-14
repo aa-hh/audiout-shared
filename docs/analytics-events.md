@@ -19,17 +19,18 @@ question's own answer — and the Settings "Share usage data" switch changes the
 answer later, either way. A phone that only ever enters demo mode is never
 asked and so never reports. Debug builds of the phone never start the SDK, so
 nothing a developer or a test run does reports. Every phone event sent while
-demo mode is active carries `demo: true`. The Mac is opt-out, but
-only through the free trial: analytics are on from first launch, with a
-Settings switch to turn them off that sticks once flipped. A paid user is
-asked once — a direct buyer sees the onboarding usage-stats card, a trial
-converter sees a one-time popover right after their paid key is accepted —
-and declining stops future collection, though whatever the trial already sent
-stays. Rulings: owner, 2026-09-12 for the Mac, 2026-10-14 for the phone. A joined report that lines up a Mac and a
-phone by `mac_id` only fails to find a match for a paid user who declined
-that one-time ask, a Mac whose owner turned the Settings switch off during
-the trial, a phone that connected before any Mac analytics fired, or a phone
-whose owner declined the usage-data question or has not been asked it yet.
+demo mode is active carries `demo: true`. The Mac is opt-out, but only through
+the free trial: analytics are on from first launch, with a Settings switch to
+turn them off that sticks once flipped. A paid user is asked once — a direct
+buyer sees the onboarding usage-stats card, a trial converter sees a one-time
+popover right after their paid key is accepted — and declining stops future
+collection, though whatever the trial already sent stays. Rulings: owner,
+2026-09-12 for the Mac, 2026-10-14 for the phone. A joined report that lines
+up a Mac and a phone by `mac_id` only fails to find a match for a paid user
+who declined that one-time ask, a Mac whose owner turned the Settings switch
+off during the trial, a phone that connected before any Mac analytics fired,
+or a phone whose owner declined the usage-data question or has not been asked
+it yet.
 
 `mac_id` is the join key between a Mac and the phones connected to it. It is
 the value the Mac sends as `serverID` in its `welcome` message when a phone
