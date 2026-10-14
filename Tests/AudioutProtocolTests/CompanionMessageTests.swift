@@ -620,6 +620,34 @@ import Testing
         #expect(snapshot.devices.isEmpty)
         #expect(snapshot.activeGroupID == nil)
         #expect(snapshot.takeoverStatus == nil)
+        #expect(snapshot.macAppVersion == nil, "a welcome from a Mac that predates the field decodes as no Mac version")
+    }
+
+    /// Turns red if `macAppVersion` is dropped from `Snapshot`'s coding.
+    @Test func aWelcomeCarriesTheMacAppVersionThroughARoundTrip() throws {
+        let snapshot = Snapshot(
+            serverName: "Alec's Mac",
+            devices: [],
+            mainOut: MainOutState(kind: "selected"),
+            mainOutMasterVolume: 50,
+            mainOutMuted: false,
+            groups: [],
+            appRoutes: [],
+            liveRoutedAppNames: [:],
+            addableApps: [],
+            localFallbackActive: false,
+            macAppVersion: "1.3",
+            settings: SettingsState(connectVolume: 50, connectVolumeMin: 0, connectVolumeMax: 100,
+                                    startBufferMs: 200, startBufferOptionsMs: [100, 200])
+        )
+        let data = try CompanionEnvelope(message: .welcome(serverName: "Alec's Mac", protoVersion: 1,
+                                                           snapshot: snapshot, companionToken: nil,
+                                                           serverID: nil)).encoded()
+        guard case .welcome(_, _, let decoded, _, _) = try CompanionEnvelope.decode(data).message else {
+            Issue.record("expected .welcome")
+            return
+        }
+        #expect(decoded.macAppVersion == "1.3")
     }
 
     /// A group route names WHICH group. The id rides its own field, so a

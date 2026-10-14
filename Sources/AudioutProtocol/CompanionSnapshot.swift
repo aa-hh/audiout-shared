@@ -396,6 +396,13 @@ public struct Snapshot: Codable, Equatable, Sendable {
     /// `systemDefaultIsAirPlayActive`. `nil` from an older Mac, which keeps
     /// sending those two.
     public var note: NoteState?
+    /// The Mac app's `CFBundleShortVersionString`. Optional so a peer built
+    /// before this field decodes cleanly (additive change, no protocol break);
+    /// `nil` from a Mac that predates the field, and from a dev run that has no
+    /// bundle to read it from. The phone shows it in its problem report so a
+    /// support email names both ends' versions; nothing behaves differently on
+    /// it.
+    public var macAppVersion: String?
     public var settings: SettingsState
 
     public init(
@@ -415,6 +422,7 @@ public struct Snapshot: Codable, Equatable, Sendable {
         transportAvailable: Bool? = nil,
         missingSpeakers: [MissingSpeakerState]? = nil,
         note: NoteState? = nil,
+        macAppVersion: String? = nil,
         settings: SettingsState
     ) {
         self.serverName = serverName
@@ -433,6 +441,7 @@ public struct Snapshot: Codable, Equatable, Sendable {
         self.transportAvailable = transportAvailable
         self.missingSpeakers = missingSpeakers
         self.note = note
+        self.macAppVersion = macAppVersion
         self.settings = settings
     }
 }
