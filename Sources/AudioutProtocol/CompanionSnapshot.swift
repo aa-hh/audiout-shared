@@ -162,6 +162,15 @@ public struct DeviceState: Codable, Equatable, Sendable {
     /// streaming). `nil` means an older Mac; a phone then shows the speaker as
     /// connected only, never playing.
     public var isPlaying: Bool?
+    /// The receiver's own product identity, never anything the user typed.
+    /// AirPlay: the advertised TXT `model` code. Cast: the advertised `md`
+    /// model string. Bluetooth: `bt:<vendor>:<product>`, each four lowercase
+    /// hex digits, from the pairing's cached Device ID record; where that is
+    /// absent, a phrase from a fixed product list matched against the
+    /// speaker's name. Advertised strings are trimmed and capped at 40
+    /// characters. `nil` means an older Mac or no identity read; never the
+    /// speaker's user-given name.
+    public var model: String?
 
     public init(
         id: String,
@@ -179,7 +188,8 @@ public struct DeviceState: Codable, Equatable, Sendable {
         alignment: AlignmentState? = nil,
         mixerVisibility: String? = nil,
         isVisibleInMixer: Bool? = nil,
-        isPlaying: Bool? = nil
+        isPlaying: Bool? = nil,
+        model: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -197,6 +207,7 @@ public struct DeviceState: Codable, Equatable, Sendable {
         self.mixerVisibility = mixerVisibility
         self.isVisibleInMixer = isVisibleInMixer
         self.isPlaying = isPlaying
+        self.model = model
     }
 }
 
