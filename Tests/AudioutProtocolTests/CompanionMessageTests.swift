@@ -27,7 +27,8 @@ import Testing
                     connection: DeviceState.ConnectionInfo(state: "connected"),
                     mixerVisibility: "always",
                     isVisibleInMixer: true,
-                    isPlaying: true
+                    isPlaying: true,
+                    model: "AudioAccessory5,1"
                 ),
                 DeviceState(
                     id: "device-2",
@@ -243,7 +244,7 @@ import Testing
         #expect(icons[1].png == nil)
     }
 
-    // Renaming a coding key or dropping a field on `Snapshot` or `DeviceState`, `isPlaying` included, turns this red.
+    // Renaming a coding key or dropping a field on `Snapshot` or `DeviceState`, `isPlaying` and `model` included, turns this red.
     @Test func fullyPopulatedSnapshotRoundTrips() throws {
         let snapshot = Self.fullSnapshot()
         let data = try JSONEncoder().encode(snapshot)
@@ -253,6 +254,7 @@ import Testing
         #expect(reloaded.devices[0].mixerVisibility == "always")
         #expect(reloaded.devices[0].isVisibleInMixer == true)
         #expect(reloaded.devices[0].isPlaying == true)
+        #expect(reloaded.devices[0].model == "AudioAccessory5,1")
         #expect(reloaded.missingSpeakers == [MissingSpeakerState(id: "device-9", name: "Garage", kind: "sonos")])
         #expect(reloaded.note == NoteState(text: "Audiout isn't your Mac's output device.", severity: "warning"))
     }
@@ -271,7 +273,7 @@ import Testing
         #expect(reloaded.note == nil)
     }
 
-    // Making `mixerVisibility`, `isVisibleInMixer` or `isPlaying` a required key on `DeviceState` turns this red.
+    // Making `mixerVisibility`, `isVisibleInMixer`, `isPlaying` or `model` a required key on `DeviceState` turns this red.
     @Test func aDeviceWithoutVisibilityOrPlayingKeysDecodesWithAllNil() throws {
         let json = """
         {"id": "d1", "name": "Den", "kind": "homePod", "iconSymbolName": "homepod.fill",
@@ -283,6 +285,7 @@ import Testing
         #expect(decoded.mixerVisibility == nil)
         #expect(decoded.isVisibleInMixer == nil)
         #expect(decoded.isPlaying == nil)
+        #expect(decoded.model == nil)
     }
 
     @Test func snapshotWithoutTransportAvailableKeyDecodesAsNotReported() throws {
@@ -655,6 +658,34 @@ import Testing
         #expect(snapshot.devices.isEmpty)
         #expect(snapshot.activeGroupID == nil)
         #expect(snapshot.takeoverStatus == nil)
+        #expect(snapshot.macAppVersion == nil, "a welcome from a Mac that predates the field decodes as no Mac version")
+    }
+
+    /// Turns red if `macAppVersion` is dropped from `Snapshot`'s coding.
+    @Test func aWelcomeCarriesTheMacAppVersionThroughARoundTrip() throws {
+        let snapshot = Snapshot(
+            serverName: "Alec's Mac",
+            devices: [],
+            mainOut: MainOutState(kind: "selected"),
+            mainOutMasterVolume: 50,
+            mainOutMuted: false,
+            groups: [],
+            appRoutes: [],
+            liveRoutedAppNames: [:],
+            addableApps: [],
+            localFallbackActive: false,
+            macAppVersion: "1.3",
+            settings: SettingsState(connectVolume: 50, connectVolumeMin: 0, connectVolumeMax: 100,
+                                    startBufferMs: 200, startBufferOptionsMs: [100, 200])
+        )
+        let data = try CompanionEnvelope(message: .welcome(serverName: "Alec's Mac", protoVersion: 1,
+                                                           snapshot: snapshot, companionToken: nil,
+                                                           serverID: nil)).encoded()
+        guard case .welcome(_, _, let decoded, _, _) = try CompanionEnvelope.decode(data).message else {
+            Issue.record("expected .welcome")
+            return
+        }
+        #expect(decoded.macAppVersion == "1.3")
     }
 
     /// A group route names WHICH group. The id rides its own field, so a
