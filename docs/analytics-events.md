@@ -14,7 +14,12 @@ which one.
 
 Consent differs by app and is not symmetric. The phone is opt-in: analytics
 are off until the user answers a one-time ask shown after the first
-successful connection, and the Settings switch changes it afterwards. The Mac
+successful connection to a Mac, and the Settings "Share usage data" switch
+changes that answer afterwards, either way. A decline sends nothing at all,
+not even the answer itself. A phone that only ever enters demo mode is never
+asked and so never reports. Debug builds of the phone never start the SDK, so
+nothing a developer or a test run does reports. Every phone event sent while
+demo mode is active carries `demo: true`. The Mac
 is opt-out, but only through the free trial: analytics are on from first
 launch, with a Settings switch to turn them off that sticks once flipped. A
 paid user is asked once — a direct buyer sees the onboarding usage-stats
@@ -135,6 +140,15 @@ itself.
 | `sync:verdict` | phone | `mac_id`, `speaker_kind`, `offset_source`, `settled`, `offset_ms_bucket`, `verdict`, `probe_sound` | `offset_source`: `measured`, `firstPass`, `fromLastTime`, `byEar`; `settled`: `true`/`false`, the Mac's clock verdict for that speaker at this moment; `offset_ms_bucket`: `0-9`, `10-39`, `40-99`, `100+` (absolute value, in milliseconds); `verdict`: `applied`, `firstPass`, `refused`; `probe_sound`: `glide_chord`, which probe sound the Mac staged; builds before 2026-10-06 send no value | A probe run finishes and the phone shows its result. |
 | `sync:recheck_accepted` | phone | `mac_id`, `speaker_kind` | see above | The phone's offer to re-check a first-pass measurement (once the Mac reports the speaker settled) is accepted. |
 | `sync:by_ear_nudged` | phone | `mac_id`, `speaker_kind` | see above | The user moves the by-ear slider one step in the sync sheet. One event per nudge, so a run's count says how much fiddling it took. Owner ruling 2026-09-10; the earlier reading (once per run that could not get a confident answer) is retired. |
+| `consent:granted` | phone | `mac_id` | — | The one-time usage-data question (after the first connection) or the Settings switch turns sharing on. Grant-only: a decline sends nothing. |
+| `connect:failed` | phone | `reason` | `local_network_denied` (the Local Network permission appears denied), `not_approved`, `approval_timed_out`, `mac_too_old` (the Mac refused the phone's newer protocol), `mac_too_new` (the Mac speaks a newer protocol than the phone), `mac_busy` (server full), `mac_disabled` (control from iPhone turned off on the Mac), `identity_refused`, `mac_quit` (the Mac app shut down), `link_lost` (keepalive timeout), `dial_failed` (transport or handshake failure), `other` | A connection attempt ends without a session, or a live link drops. `dial_failed`, `link_lost`, `mac_quit` and `other` fire once per unbroken run of attempts; the rest fire each time. Never in demo mode; never when the user hung up. |
+| `remote:command_sent` | phone | `mac_id`, `command` | `command`: `setDeviceSelected`, `retryConnection`, `setMainOut`, `setDeviceVolume`, `setDeviceMuted`, `setSpeakerVisibility`, `forgetSpeakers`, `setMainOutMasterVolume`, `setMainOutMuted`, `createGroup`, `updateGroup`, `deleteGroup`, `setGroupMuted`, `addAppRoute`, `removeAppRoute`, `setAppDestination`, `setAppVolume`, `setConnectVolume`, `setStartBufferMs` | A user gesture sends a command to a live, real Mac. Sliders count once per gesture (the final send), never per tick. Alignment, password, icon and licence commands are not counted. Not sent in demo mode. |
+| `license:purchase_started` | phone | — | — | Buy is tapped with a loaded product; the App Store sheet is about to appear. |
+| `license:purchase_ended` | phone | `outcome` | `success` (verified; `license:claim_ended` follows), `cancelled`, `pending` (Ask to Buy / SCA), `unverified`, `failed` | The App Store purchase call returns. |
+| `license:claim_ended` | phone | `outcome`, `claim_source` | `outcome`: `claimed`, `refunded`, `rejected`, `not_confirmed`; `claim_source`: `purchase`, `restore`, `launch`, `update` | The licence server answers for a verified transaction, or the phone stops asking after its retries. `claim_source` rather than `source`, which already carries `phone` on every phone event. |
+| `license:restore_ended` | phone | `outcome` | `found` (an entitlement was handed to the claim), `nothing_to_restore`, `unreachable` | "Restore purchase" finishes its App Store sync. |
+| `license:product_unavailable` | phone | — | — | A product load attempt ends with no product (App Store unreachable or product missing). |
+| `support:report_shared` | phone | `mac_id` | — | A "Report a problem" file is generated for the share sheet. |
 
 ## Licence server events
 
@@ -161,7 +175,11 @@ Alongside events, the licence server and the website send PostHog Logs
 (OpenTelemetry log records, EU cloud, 14-day retention). Same project, same
 rules as events: no device name, person's name, email, bundle identifier or
 network identifier. The Mac app sends no logs: its diagnostic log is written
-on the Mac and stays there. The phone sends none either.
+on the Mac and stays there. The phone sends none either: it writes an
+`os.Logger` log on the phone, under the categories `connection`, `session`,
+`licence` and `analytics`, carrying no names, ids, keys or tokens, and that
+log never leaves the device by itself. "Report a problem" in the phone's
+Settings attaches this launch's lines to an email the user reads and sends.
 
 | `service.name` | sender | gate | what a line is |
 |---|---|---|---|
@@ -183,7 +201,9 @@ here leave the Mac; the speaker id, the file path and the raw error text stay
 in the local log. That type is the only locator a report carries; the matching
 line in the Mac's local `telemetry.jsonl`, at `level:error`, holds the detail.
 Unhandled crashes are reported by the PostHog SDK itself and are not in this
-list.
+list. The phone's unhandled crashes are reported the same way, by the SDK
+itself under the same consent answer, and the phone defines no exception types
+of its own.
 
 | exception type | properties | allowed values | when it fires |
 |---|---|---|---|
@@ -221,6 +241,9 @@ list.
 - `verdict` (`applied`, `firstPass`, `refused`): what the phone did with a
   measurement it just took.
 - `mac_id`: the join key described above.
+- `demo` (phone only, `true`): present on every phone event sent while demo
+  mode — the pretend Mac with six pretend speakers — is active; absent
+  otherwise. Filter it out of any insight meant to count real use.
 - `distribution` (`official`, `source`), Mac only, on every event: whether
   the copy is a release the owner signed with the Audiout Developer ID team
   or a copy someone built from the public repository. The token that reaches
