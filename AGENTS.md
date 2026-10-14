@@ -66,7 +66,11 @@ share had to become a repository of its own.
 - **Changing the wire encoding of an existing `CompanionMessage` or
   `CompanionCommand` case is a protocol break**, not a refactor — both peers
   must ship together or one silently misdecodes the other. Add a new case
-  instead.
+  instead. One exception (owner's call, 2026-10-15): a case may gain an
+  OPTIONAL payload key that older peers ignore and that decodes as "off" when
+  absent (`decodeIfPresent ?? <off>`), with a test pinning the absent-key
+  decode (e.g. `hello`'s `checksPairingCode`). The new associated value still
+  breaks consumers' Swift patterns, so tag it and move both pins together.
 - **Bump `CompanionProto.version` only when a case's SEMANTICS change** in a way
   an old peer would misinterpret — not merely for a new case, which `.unknown`
   already absorbs.

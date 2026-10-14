@@ -123,6 +123,33 @@ import Testing
         #expect(envelope.message == .hello(clientKey: "", clientName: "iPhone", protoVersion: 2, signature: ""))
     }
 
+    // Turns red if `checksPairingCode` is dropped from the encoder or the
+    // decoder, or its payload key changes on one side only.
+    @Test func helloCarriesWhetherThePhoneIsCheckingTheCode() throws {
+        let message = CompanionMessage.hello(
+            clientKey: Self.clientKey,
+            clientName: "Alec's iPhone",
+            protoVersion: 2,
+            signature: Self.signature,
+            checksPairingCode: true)
+        #expect(try roundTrip(message) == message)
+    }
+
+    /// A phone built against 0.26.0 sends no `checksPairingCode` key; the Mac
+    /// must read that as "not checking", not refuse the hello.
+    // Turns red if the decoder reads `checksPairingCode` with `decode`
+    // instead of `decodeIfPresent ?? false`.
+    @Test func aHelloWithoutTheCodeCheckFlagReadsAsNotChecking() throws {
+        let json = """
+        {"v": 2, "type": "hello", "payload": {"clientName": "iPhone", "protoVersion": 2}}
+        """
+        let envelope = try CompanionEnvelope.decode(Data(json.utf8))
+        guard case .hello(_, _, _, _, let checks) = envelope.message else {
+            Issue.record("expected a hello"); return
+        }
+        #expect(checks == false)
+    }
+
     // Turns red if the `challenge` case is dropped from the encoder or the
     // decoder, or its payload key changes on one side only.
     @Test func challengeRoundTrips() throws {
@@ -542,7 +569,7 @@ import Testing
     @Test func serverRefusesAHelloAdvertisingANewerProtoVersion() throws {
         let envelope = CompanionEnvelope(message: .hello(clientKey: Self.clientKey, clientName: "iPhone", protoVersion: CompanionProto.version + 1, signature: Self.signature))
         let decoded = try CompanionEnvelope.decode(envelope.encoded())
-        guard case .hello(_, _, let protoVersion, _) = decoded.message else {
+        guard case .hello(_, _, let protoVersion, _, _) = decoded.message else {
             Issue.record("expected .hello")
             return
         }
