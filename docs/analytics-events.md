@@ -150,6 +150,7 @@ itself.
 | `license:restore_ended` | phone | `outcome` | `found` (an entitlement was handed to the claim), `nothing_to_restore`, `unreachable` | "Restore purchase" finishes its App Store sync. |
 | `license:product_unavailable` | phone | — | — | A product load attempt ends with no product (App Store unreachable or product missing). |
 | `support:report_shared` | phone | `mac_id` | — | A "Report a problem" file is generated for the share sheet. |
+| `survey sent` | phone | `$survey_id`, `$survey_response_f448feab-cc6c-4d7c-a170-25bdfe732045`, `$survey_questions`, `app_version`, `app_build`, `device_model`, `os_version` | `$survey_id`: `01a150ee-31ea-0000-d6de-9435bddba5f6` (the "iOS beta feedback" survey, type api); the response property: the tester's free text; `device_model`: the hardware id (`iPhone16,1`); `$geoip_disable`: `true` and `$process_person_profile`: `false` always | A TestFlight or Debug build's feedback sheet sends, only when the tester taps Send. PostHog's own survey event name, not this file's `area:action` form, so it lands in the survey's results. Posted straight to the capture endpoint, not through the SDK: it goes out whatever the "Share usage data" answer, in Debug too, with a fresh random `distinct_id` each time, and carries no `mac_id`, `source` or `demo`. |
 
 ## Licence server events
 
