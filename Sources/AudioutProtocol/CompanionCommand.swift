@@ -54,10 +54,13 @@ public enum CompanionCommand: Equatable, Sendable {
     case requestAppIcons(bundleIDs: [String])
 
     /// Starts a sync-calibration run for `targetID`: the Mac stages and
-    /// plays the chirp measurement. Refused (as a failed `commandResult`)
-    /// when the target isn't currently audible or no audible reference
-    /// exists.
-    case startAlignmentProbe(targetID: String)
+    /// plays the chirp measurement. `referenceID` names the output to
+    /// compare against; `nil` lets the Mac pick its default (its own
+    /// hardware output when it has one). The Mac makes both the target and
+    /// that output audible for the run. Refused (as a failed
+    /// `commandResult`) only when the named output can't be compared
+    /// against or the Mac can't stage a run.
+    case startAlignmentProbe(targetID: String, referenceID: String?)
     /// Cancels an in-flight sync-calibration run for `targetID`.
     case cancelAlignmentProbe(targetID: String)
     /// Reports the phone's raw sweep-arrival measurement for `targetID`.
@@ -66,7 +69,8 @@ public enum CompanionCommand: Equatable, Sendable {
     /// applying it.
     case reportAlignmentMeasurement(targetID: String, offsetMs: Double, confidence: Double)
     /// Turns the by-ear fine-tune metronome tick on/off for `targetID`.
-    case setAlignmentTick(targetID: String, active: Bool)
+    /// An `active: true` carries the same `referenceID` as the run it follows.
+    case setAlignmentTick(targetID: String, active: Bool, referenceID: String?)
     /// Nudges `targetID`'s alignment trim by `deltaMs` (one haptic detent's
     /// worth). Applied immediately, never coalesced.
     case nudgeAlignmentTrim(targetID: String, deltaMs: Double)
@@ -126,6 +130,7 @@ extension CompanionCommand: Codable {
         case key
         case password
         case visibility, ids
+        case referenceID
     }
 
     private enum Name: String {
@@ -196,7 +201,7 @@ extension CompanionCommand: Codable {
         case .requestAppIcons:
             self = .requestAppIcons(bundleIDs: try c.decode([String].self, forKey: .bundleIDs))
         case .startAlignmentProbe:
-            self = .startAlignmentProbe(targetID: try c.decode(String.self, forKey: .id))
+            self = .startAlignmentProbe(targetID: try c.decode(String.self, forKey: .id), referenceID: try c.decodeIfPresent(String.self, forKey: .referenceID))
         case .cancelAlignmentProbe:
             self = .cancelAlignmentProbe(targetID: try c.decode(String.self, forKey: .id))
         case .reportAlignmentMeasurement:
@@ -206,7 +211,7 @@ extension CompanionCommand: Codable {
                 confidence: try c.decode(Double.self, forKey: .confidence)
             )
         case .setAlignmentTick:
-            self = .setAlignmentTick(targetID: try c.decode(String.self, forKey: .id), active: try c.decode(Bool.self, forKey: .active))
+            self = .setAlignmentTick(targetID: try c.decode(String.self, forKey: .id), active: try c.decode(Bool.self, forKey: .active), referenceID: try c.decodeIfPresent(String.self, forKey: .referenceID))
         case .nudgeAlignmentTrim:
             self = .nudgeAlignmentTrim(targetID: try c.decode(String.self, forKey: .id), deltaMs: try c.decode(Double.self, forKey: .deltaMs))
         case .revertAlignmentNudge:
@@ -305,9 +310,10 @@ extension CompanionCommand: Codable {
         case .requestAppIcons(let bundleIDs):
             try c.encode(Name.requestAppIcons.rawValue, forKey: .command)
             try c.encode(bundleIDs, forKey: .bundleIDs)
-        case .startAlignmentProbe(let targetID):
+        case .startAlignmentProbe(let targetID, let referenceID):
             try c.encode(Name.startAlignmentProbe.rawValue, forKey: .command)
             try c.encode(targetID, forKey: .id)
+            try c.encodeIfPresent(referenceID, forKey: .referenceID)
         case .cancelAlignmentProbe(let targetID):
             try c.encode(Name.cancelAlignmentProbe.rawValue, forKey: .command)
             try c.encode(targetID, forKey: .id)
@@ -316,10 +322,11 @@ extension CompanionCommand: Codable {
             try c.encode(targetID, forKey: .id)
             try c.encode(offsetMs, forKey: .offsetMs)
             try c.encode(confidence, forKey: .confidence)
-        case .setAlignmentTick(let targetID, let active):
+        case .setAlignmentTick(let targetID, let active, let referenceID):
             try c.encode(Name.setAlignmentTick.rawValue, forKey: .command)
             try c.encode(targetID, forKey: .id)
             try c.encode(active, forKey: .active)
+            try c.encodeIfPresent(referenceID, forKey: .referenceID)
         case .nudgeAlignmentTrim(let targetID, let deltaMs):
             try c.encode(Name.nudgeAlignmentTrim.rawValue, forKey: .command)
             try c.encode(targetID, forKey: .id)

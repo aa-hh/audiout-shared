@@ -72,9 +72,18 @@ public struct DeviceState: Codable, Equatable, Sendable {
         /// re-check. Kept as `String` (not an enum) so an old capture using
         /// the retired value still decodes.
         public var staleReason: String?
-        /// The audible reference the Mac would measure against; `nil` means
-        /// none usable, which gates the sync sheet's CTA off.
+        /// The output the Mac compares against unless the phone names
+        /// another: its own hardware output when it has one, whether or not
+        /// it is playing; otherwise the one other playing speaker, else the
+        /// first available non-Cast speaker. `nil` means no other speaker
+        /// exists. Valid even when ``referenceCandidateIDs`` does not
+        /// contain it.
         public var referenceID: String?
+        /// The Mac's own hardware outputs the phone may offer as the
+        /// comparison, in the Mac's order, whether or not any is playing.
+        /// `nil` means an older Mac. An empty list with a non-nil
+        /// ``referenceID`` means no choice: the Mac will use `referenceID`.
+        public var referenceCandidateIDs: [String]?
         /// Superseded by ``clockState`` (0.7.0): a Mac that publishes
         /// `clockState` publishes `nil` here. Kept so an older snapshot still
         /// decodes; a phone should gate on `clockState` when it is present.
@@ -114,6 +123,7 @@ public struct DeviceState: Codable, Equatable, Sendable {
             status: String,
             staleReason: String? = nil,
             referenceID: String? = nil,
+            referenceCandidateIDs: [String]? = nil,
             settleRemainingSeconds: Int? = nil,
             clockState: String? = nil,
             source: String? = nil,
@@ -122,6 +132,7 @@ public struct DeviceState: Codable, Equatable, Sendable {
             self.status = status
             self.staleReason = staleReason
             self.referenceID = referenceID
+            self.referenceCandidateIDs = referenceCandidateIDs
             self.settleRemainingSeconds = settleRemainingSeconds
             self.clockState = clockState
             self.source = source
