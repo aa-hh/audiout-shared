@@ -214,6 +214,13 @@ import Testing
         #expect(try roundTrip(message) == message)
     }
 
+    // Turns red if the `removed` constant is renamed or dropped, or its spelling changes.
+    @Test func removedIsASpelledGoodbyeReason() throws {
+        #expect(CompanionGoodbyeReason.removed == "removed")
+        let message = CompanionMessage.goodbye(reason: CompanionGoodbyeReason.removed)
+        #expect(try roundTrip(message) == message)
+    }
+
     // Turns red if `roomDelaySeconds` stops being encoded or decoded in `alignmentProbeStarted`.
     @Test func alignmentProbeStartedRoundTrips() throws {
         let message = CompanionMessage.alignmentProbeStarted(deviceID: "device-2", roomDelaySeconds: 2.0)
