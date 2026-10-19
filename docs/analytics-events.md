@@ -62,6 +62,9 @@ itself.
 | `license:thank_you_closed` | mac | — | — | The thank-you card's Close button is clicked. |
 | `license:conversion_consent_opted_in` | mac | — | — | A trial converter accepts the one-time post-purchase usage-statistics ask. Grant-only: there is no matching decline event, since a decline just stops future events. |
 | `license:launch_clamp_lifted` | mac | `clamped`, `speaker_count` | `clamped`: `speakers`, `scene`; `speaker_count`: the number of speakers in what was stored, as a string | At launch an unregistered install replaced a stored two-or-more-speaker selection or scene with This Mac (spec J5), and the licence answer that same launch then lifted the one-speaker limit; the selection it dropped is not restored. Owner accepted this 2026-10-04 and wants it counted. |
+| `survey shown` | mac | `$survey_name`, `$survey_id`, `$survey_iteration`, `$survey_iteration_start_date` | — | The expired-trial survey invite appears in the Mixer's note slot: the trial has ended, the user has streamed on two separate days since, usage statistics are on, the PostHog survey is active, and the invite has never been shown before. Once ever. |
+| `survey sent` | mac | `$survey_name`, `$survey_id`, `$survey_iteration`, `$survey_iteration_start_date`, `$survey_response_<question id>`, `$survey_questions`, `$set` `$survey_responded/<survey id>` | `$survey_response_<question id>`: a string for a single-choice question and for the open question, an array of strings for a multiple-choice question | Send or Skip is clicked at the survey's text step. The open question's value is the one free-text property the Mac app sends. |
+| `survey dismissed` | mac | `$survey_name`, `$survey_id`, `$survey_iteration`, `$survey_iteration_start_date`, `$survey_response_<question id>` for answers given so far, `$survey_questions`, `$survey_partially_completed`, `$set` `$survey_dismissed/<survey id>` | as `survey sent` | Not now or Escape is pressed, the popover is hidden, or the user switches tab while the invite or the survey card is up. Answers given before quitting part-way ride on this event; there is no partial `survey sent`. |
 | `license:key_pasted` | mac | `outcome` | `no_key`, `filled` | The Paste button on the license gate is clicked, with whether the clipboard held a usable key. |
 | `license:resend_requested` | mac | — | — | The gate's "Resend" (license email) is requested. |
 | `mixer:bt_pairing_settings_opened` | mac | — | — | "Pair a Bluetooth speaker" opens macOS's own Bluetooth settings pane. |
@@ -258,3 +261,6 @@ of its own.
   from anything in the build. A source build has no licence server and so
   never appears in a purchase funnel — filter every insight by this property
   so the two populations do not blend.
+- `survey shown`, `survey sent` and `survey dismissed`, and their
+  `$`-prefixed properties, are PostHog's own survey contract, not this
+  file's `category:object_action` scheme.
