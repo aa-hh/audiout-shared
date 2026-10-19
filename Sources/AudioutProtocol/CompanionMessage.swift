@@ -139,6 +139,8 @@ public enum CompanionGoodbyeReason {
     /// The approval prompt sat unanswered past the Mac's deadline. Retryable:
     /// reconnecting asks again.
     public static let approvalTimedOut = "approvalTimedOut"
+    /// The Mac's user removed this phone in Settings › Audiout Remote. Terminal: forget the Mac and pair again.
+    public static let removed = "removed"
 }
 
 /// The allowed values of ``DeviceState/AlignmentState/source`` and
