@@ -448,6 +448,31 @@ import Testing
         #expect(device.id == "device-1")
     }
 
+    // Turns red if the decoder reads `referenceID` on `startAlignmentProbe` with
+    // `decode` instead of `decodeIfPresent`.
+    @Test func startAlignmentProbeWithoutReferenceIDDecodes() throws {
+        let json = #"{"command":"startAlignmentProbe","id":"device-2"}"#
+        let command = try JSONDecoder().decode(CompanionCommand.self, from: Data(json.utf8))
+        #expect(command == .startAlignmentProbe(targetID: "device-2", referenceID: nil))
+    }
+
+    // Turns red if the decoder reads `referenceID` on `setAlignmentTick` with
+    // `decode` instead of `decodeIfPresent`.
+    @Test func setAlignmentTickWithoutReferenceIDDecodes() throws {
+        let json = #"{"command":"setAlignmentTick","id":"device-2","active":true}"#
+        let command = try JSONDecoder().decode(CompanionCommand.self, from: Data(json.utf8))
+        #expect(command == .setAlignmentTick(targetID: "device-2", active: true, referenceID: nil))
+    }
+
+    // Turns red if `referenceCandidateIDs` on `AlignmentState` becomes
+    // non-optional or gets a decoded default other than `nil`.
+    @Test func alignmentStateWithoutReferenceCandidatesDecodes() throws {
+        let json = #"{"status":"tuned","referenceID":"device-1"}"#
+        let state = try JSONDecoder().decode(DeviceState.AlignmentState.self, from: Data(json.utf8))
+        #expect(state.referenceCandidateIDs == nil)
+        #expect(state.referenceID == "device-1")
+    }
+
     /// Old-peer compatibility: a `ConnectionInfo` from a Mac that predates
     /// `access` must still decode, with `access` reading `nil`. Making
     /// `access` non-optional turns this red.
@@ -484,10 +509,11 @@ import Testing
         .setConnectVolume(volume: 60),
         .setStartBufferMs(ms: 300),
         .requestAppIcons(bundleIDs: ["com.spotify.client", "com.apple.Music"]),
-        .startAlignmentProbe(targetID: "device-2"),
+        .startAlignmentProbe(targetID: "device-2", referenceID: "device-1"),
+        .startAlignmentProbe(targetID: "device-2", referenceID: nil),
         .cancelAlignmentProbe(targetID: "device-2"),
         .reportAlignmentMeasurement(targetID: "device-2", offsetMs: 96.5, confidence: 30.0),
-        .setAlignmentTick(targetID: "device-2", active: true),
+        .setAlignmentTick(targetID: "device-2", active: true, referenceID: "device-1"),
         .nudgeAlignmentTrim(targetID: "device-2", deltaMs: -5.0),
         .revertAlignmentNudge(targetID: "device-2"),
         .clearAlignmentTuning(targetID: "device-2"),
