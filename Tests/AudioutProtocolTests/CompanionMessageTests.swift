@@ -123,33 +123,6 @@ import Testing
         #expect(envelope.message == .hello(clientKey: "", clientName: "iPhone", protoVersion: 2, signature: ""))
     }
 
-    // Turns red if `checksPairingCode` is dropped from the encoder or the
-    // decoder, or its payload key changes on one side only.
-    @Test func helloCarriesWhetherThePhoneIsCheckingTheCode() throws {
-        let message = CompanionMessage.hello(
-            clientKey: Self.clientKey,
-            clientName: "Alec's iPhone",
-            protoVersion: 2,
-            signature: Self.signature,
-            checksPairingCode: true)
-        #expect(try roundTrip(message) == message)
-    }
-
-    /// A phone built against 0.26.0 sends no `checksPairingCode` key; the Mac
-    /// must read that as "not checking", not refuse the hello.
-    // Turns red if the decoder reads `checksPairingCode` with `decode`
-    // instead of `decodeIfPresent ?? false`.
-    @Test func aHelloWithoutTheCodeCheckFlagReadsAsNotChecking() throws {
-        let json = """
-        {"v": 2, "type": "hello", "payload": {"clientName": "iPhone", "protoVersion": 2}}
-        """
-        let envelope = try CompanionEnvelope.decode(Data(json.utf8))
-        guard case .hello(_, _, _, _, let checks) = envelope.message else {
-            Issue.record("expected a hello"); return
-        }
-        #expect(checks == false)
-    }
-
     // Turns red if the `challenge` case is dropped from the encoder or the
     // decoder, or its payload key changes on one side only.
     @Test func challengeRoundTrips() throws {
@@ -157,8 +130,11 @@ import Testing
         #expect(try roundTrip(message) == message)
     }
 
-    @Test func awaitingApprovalRoundTrips() throws {
-        #expect(try roundTrip(.awaitingApproval) == .awaitingApproval)
+    // Turns red if `screenLocked` is dropped from the encoder or the decoder,
+    // or its payload key changes on one side only.
+    @Test func awaitingApprovalCarriesWhetherTheMacScreenIsLocked() throws {
+        #expect(try roundTrip(.awaitingApproval(screenLocked: true)) == .awaitingApproval(screenLocked: true))
+        #expect(try roundTrip(.awaitingApproval(screenLocked: false)) == .awaitingApproval(screenLocked: false))
     }
 
     @Test func commandMessageRoundTrips() throws {
@@ -212,6 +188,25 @@ import Testing
     @Test func goodbyeRoundTrips() throws {
         let message = CompanionMessage.goodbye(reason: "shutdown")
         #expect(try roundTrip(message) == message)
+    }
+
+    // Turns red if `retryAfterSeconds` is dropped from the encoder or the
+    // decoder, or the `pairingPaused` constant is renamed or respelled.
+    @Test func pairingPausedGoodbyeCarriesSecondsRemaining() throws {
+        #expect(CompanionGoodbyeReason.pairingPaused == "pairingPaused")
+        let message = CompanionMessage.goodbye(reason: CompanionGoodbyeReason.pairingPaused, retryAfterSeconds: 742)
+        #expect(try roundTrip(message) == message)
+    }
+
+    // Turns red if a goodbye without `retryAfterSeconds` stops decoding as
+    // `nil`, or the encoder starts writing the key when there is no value.
+    @Test func aGoodbyeWithoutRetryAfterDecodesAsNil() throws {
+        let json = """
+        {"v": 3, "type": "goodbye", "payload": {"reason": "shutdown"}}
+        """
+        #expect(try CompanionEnvelope.decode(Data(json.utf8)).message == .goodbye(reason: "shutdown"))
+        let wire = String(decoding: try CompanionEnvelope(message: .goodbye(reason: "shutdown")).encoded(), as: UTF8.self)
+        #expect(!wire.contains("retryAfterSeconds"))
     }
 
     // Turns red if the `removed` constant is renamed or dropped, or its spelling changes.
@@ -580,9 +575,16 @@ import Testing
     }
 
     // Turns red if `isIncompatible` stops refusing a peer older than
-    // `minimumPeerVersion`, which speaks the version 1 handshake.
+    // `minimumPeerVersion`, which expects a pairing flow this side no longer runs.
     @Test func aPeerBelowTheMinimumVersionIsRefused() {
         #expect(CompanionProto.isIncompatible(peerVersion: CompanionProto.minimumPeerVersion - 1))
+    }
+
+    // Turns red if the version or the floor drops back below 3: a version 2
+    // peer still expects the pairing window and the phone-side code check.
+    @Test func aVersion2PeerIsRefused() {
+        #expect(CompanionProto.version == 3)
+        #expect(CompanionProto.isIncompatible(peerVersion: 2))
     }
 
     /// Client-side direction: the phone receives `welcome` and checks the
@@ -602,7 +604,7 @@ import Testing
     @Test func serverRefusesAHelloAdvertisingANewerProtoVersion() throws {
         let envelope = CompanionEnvelope(message: .hello(clientKey: Self.clientKey, clientName: "iPhone", protoVersion: CompanionProto.version + 1, signature: Self.signature))
         let decoded = try CompanionEnvelope.decode(envelope.encoded())
-        guard case .hello(_, _, let protoVersion, _, _) = decoded.message else {
+        guard case .hello(_, _, let protoVersion, _) = decoded.message else {
             Issue.record("expected .hello")
             return
         }
@@ -630,12 +632,24 @@ import Testing
         #expect(envelope.message == .challenge(nonce: Self.nonce))
     }
 
+    // Turns red if the `awaitingApproval` type name or its `screenLocked`
+    // payload key is renamed.
     @Test func awaitingApprovalDecodesFromAHandWrittenWireLiteral() throws {
         let json = """
-        {"v": 2, "type": "awaitingApproval", "payload": {}}
+        {"v": 3, "type": "awaitingApproval", "payload": {"screenLocked": true}}
         """
         let envelope = try CompanionEnvelope.decode(Data(json.utf8))
-        #expect(envelope.message == .awaitingApproval)
+        #expect(envelope.message == .awaitingApproval(screenLocked: true))
+    }
+
+    // Turns red if the `pairingPaused` spelling or the `retryAfterSeconds`
+    // payload key is renamed.
+    @Test func pairingPausedGoodbyeDecodesFromAHandWrittenWireLiteral() throws {
+        let json = """
+        {"v": 3, "type": "goodbye", "payload": {"reason": "pairingPaused", "retryAfterSeconds": 600}}
+        """
+        let envelope = try CompanionEnvelope.decode(Data(json.utf8))
+        #expect(envelope.message == .goodbye(reason: CompanionGoodbyeReason.pairingPaused, retryAfterSeconds: 600))
     }
 
     @Test func setDeviceSelectedCommandDecodesFromAHandWrittenWireLiteral() throws {
