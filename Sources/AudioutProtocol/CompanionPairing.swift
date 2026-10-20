@@ -3,7 +3,7 @@
 import CryptoKit
 import Foundation
 
-/// The bytes of the version 2 handshake. The Mac and the phone derive every
+/// The bytes of the handshake (unchanged since protocol version 2). The Mac and the phone derive every
 /// handshake value only through these functions — the client id, the input
 /// the phone signs, the six-digit pairing code both screens show, and the
 /// Bonjour instance name. Changing any of them is a protocol break: the two
