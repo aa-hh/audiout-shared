@@ -28,18 +28,7 @@ public enum CompanionMessage: Equatable, Sendable {
     /// or `signature` key decodes as `""` (see `CompanionEnvelope`'s
     /// decoder) so the server can refuse it with a reason instead of
     /// dropping the frame as malformed.
-    ///
-    /// `checksPairingCode` is true when the phone is asking its user to
-    /// confirm the pairing code (`CompanionPairing.pairingCode`) because it
-    /// does not know this Mac. A Mac that already approved the phone shows the
-    /// code anyway, so the user has something to compare against. It only
-    /// ever adds a screen on the Mac: the phone keeps its own check whatever
-    /// the Mac does. Absent decodes as `false`, so a phone built against an
-    /// older tag reads as not checking, and an older Mac ignores the key: the
-    /// optional-key exception to "never change an existing case's encoding"
-    /// in AGENTS.md.
-    case hello(clientKey: String, clientName: String, protoVersion: Int, signature: String,
-               checksPairingCode: Bool = false)
+    case hello(clientKey: String, clientName: String, protoVersion: Int, signature: String)
     case command(requestID: String, command: CompanionCommand)
 
     // server -> client
@@ -64,11 +53,18 @@ public enum CompanionMessage: Equatable, Sendable {
     /// (generously — minutes, not the handshake deadline) until they answer.
     /// The phone should show "check your Mac", not an error. Resolves as a
     /// `welcome` (allowed) or a `goodbye` (`notApproved` / `approvalTimedOut`).
-    case awaitingApproval
+    ///
+    /// `screenLocked` is true while the Mac's screen is locked, so the prompt
+    /// is out of sight; the phone asks its user to unlock the Mac. The Mac
+    /// sends this again, with the new value, whenever the lock changes while
+    /// the prompt is up.
+    case awaitingApproval(screenLocked: Bool)
     case state(snapshot: Snapshot)
     case commandResult(requestID: String, applied: Bool, refusalReason: String?, autoSwappedCurrentDevice: Bool)
     /// `reason` is one of `CompanionGoodbyeReason`'s constants.
-    case goodbye(reason: String)
+    /// `retryAfterSeconds` is how long until asking again can succeed, sent
+    /// only with `pairingPaused`; `nil` (absent from the wire) otherwise.
+    case goodbye(reason: String, retryAfterSeconds: Int? = nil)
     /// One page of the icons the phone requested via
     /// `CompanionCommand.requestAppIcons`, at most
     /// `CompanionAppIcons.pageSize` icons per page.
@@ -117,7 +113,9 @@ public enum CompanionGoodbyeReason {
     public static let shutdown = "shutdown"
     /// The client's protocol version is outside what the server accepts:
     /// newer than `CompanionProto.version` or older than
-    /// `CompanionProto.minimumPeerVersion`.
+    /// `CompanionProto.minimumPeerVersion`. The goodbye's envelope `v` is
+    /// the Mac's own version, so the phone can tell which side needs the
+    /// update: a `v` above its own version means update the phone.
     public static let protoMismatch = "protoMismatch"
     /// The server is at its client cap.
     public static let serverFull = "serverFull"
@@ -128,14 +126,15 @@ public enum CompanionGoodbyeReason {
     /// The signature did not verify over this connection's challenge and
     /// this Mac's certificate. Terminal.
     public static let authenticationFailed = "authenticationFailed"
-    /// This phone is unknown and no pairing window is open on the Mac. The
-    /// phone tells the user to click Pair an iPhone in Settings › Audiout
-    /// Remote. Terminal until the user reconnects.
-    public static let pairingClosed = "pairingClosed"
-    /// The Mac's user answered "Don't Allow" for this phone (now or on an
-    /// earlier connect — denials are remembered). Don't redial: the user must
-    /// revoke the denial on the Mac (Settings › Audiout Remote) first.
+    /// The Mac's user answered "Don't Allow" for this phone. The Mac keeps
+    /// no record of it: asking again raises a new prompt. Don't redial on
+    /// your own; wait for the user to ask again.
     public static let notApproved = "notApproved"
+    /// The Mac turned this unknown phone away without asking, because its
+    /// user said "Don't Allow" several times in a short spell. The goodbye's
+    /// `retryAfterSeconds` says how long the pause has left. Phones the Mac
+    /// already approved are never paused.
+    public static let pairingPaused = "pairingPaused"
     /// The approval prompt sat unanswered past the Mac's deadline. Retryable:
     /// reconnecting asks again.
     public static let approvalTimedOut = "approvalTimedOut"
@@ -207,12 +206,13 @@ extension CompanionEnvelope: Codable {
     }
 
     private enum PayloadKeys: String, CodingKey {
-        case clientKey, clientName, protoVersion, signature, checksPairingCode
+        case clientKey, clientName, protoVersion, signature
         case nonce
         case requestID, command
         case serverName, snapshot, companionToken, serverID
         case applied, refusalReason, autoSwappedCurrentDevice
-        case reason
+        case screenLocked
+        case reason, retryAfterSeconds
         case page, pageCount, icons
         case deviceID
         case measuredMs, correctedMs, source
@@ -243,8 +243,7 @@ extension CompanionEnvelope: Codable {
                 clientKey: try payload.decodeIfPresent(String.self, forKey: .clientKey) ?? "",
                 clientName: try payload.decode(String.self, forKey: .clientName),
                 protoVersion: try payload.decode(Int.self, forKey: .protoVersion),
-                signature: try payload.decodeIfPresent(String.self, forKey: .signature) ?? "",
-                checksPairingCode: try payload.decodeIfPresent(Bool.self, forKey: .checksPairingCode) ?? false
+                signature: try payload.decodeIfPresent(String.self, forKey: .signature) ?? ""
             )
         case .command:
             message = .command(
@@ -262,7 +261,7 @@ extension CompanionEnvelope: Codable {
                 serverID: try payload.decodeIfPresent(String.self, forKey: .serverID)
             )
         case .awaitingApproval:
-            message = .awaitingApproval
+            message = .awaitingApproval(screenLocked: try payload.decode(Bool.self, forKey: .screenLocked))
         case .state:
             message = .state(snapshot: try payload.decode(Snapshot.self, forKey: .snapshot))
         case .commandResult:
@@ -273,7 +272,10 @@ extension CompanionEnvelope: Codable {
                 autoSwappedCurrentDevice: try payload.decode(Bool.self, forKey: .autoSwappedCurrentDevice)
             )
         case .goodbye:
-            message = .goodbye(reason: try payload.decode(String.self, forKey: .reason))
+            message = .goodbye(
+                reason: try payload.decode(String.self, forKey: .reason),
+                retryAfterSeconds: try payload.decodeIfPresent(Int.self, forKey: .retryAfterSeconds)
+            )
         case .appIcons:
             message = .appIcons(
                 page: try payload.decode(Int.self, forKey: .page),
@@ -303,14 +305,13 @@ extension CompanionEnvelope: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(v, forKey: .v)
         switch message {
-        case .hello(let clientKey, let clientName, let protoVersion, let signature, let checksPairingCode):
+        case .hello(let clientKey, let clientName, let protoVersion, let signature):
             try c.encode(TypeName.hello.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(clientKey, forKey: .clientKey)
             try payload.encode(clientName, forKey: .clientName)
             try payload.encode(protoVersion, forKey: .protoVersion)
             try payload.encode(signature, forKey: .signature)
-            try payload.encode(checksPairingCode, forKey: .checksPairingCode)
         case .command(let requestID, let command):
             try c.encode(TypeName.command.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
@@ -328,11 +329,10 @@ extension CompanionEnvelope: Codable {
             try payload.encode(snapshot, forKey: .snapshot)
             try payload.encodeIfPresent(companionToken, forKey: .companionToken)
             try payload.encodeIfPresent(serverID, forKey: .serverID)
-        case .awaitingApproval:
+        case .awaitingApproval(let screenLocked):
             try c.encode(TypeName.awaitingApproval.rawValue, forKey: .type)
-            // Empty payload object — every type carries one (decode reads the
-            // container before switching on the type).
-            _ = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
+            var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
+            try payload.encode(screenLocked, forKey: .screenLocked)
         case .state(let snapshot):
             try c.encode(TypeName.state.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
@@ -344,10 +344,11 @@ extension CompanionEnvelope: Codable {
             try payload.encode(applied, forKey: .applied)
             try payload.encodeIfPresent(refusalReason, forKey: .refusalReason)
             try payload.encode(autoSwappedCurrentDevice, forKey: .autoSwappedCurrentDevice)
-        case .goodbye(let reason):
+        case .goodbye(let reason, let retryAfterSeconds):
             try c.encode(TypeName.goodbye.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(reason, forKey: .reason)
+            try payload.encodeIfPresent(retryAfterSeconds, forKey: .retryAfterSeconds)
         case .appIcons(let page, let pageCount, let icons):
             try c.encode(TypeName.appIcons.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)

@@ -15,12 +15,17 @@ public enum CompanionProto {
     /// break and must not happen silently — see AudioutProtocol/AGENTS.md.
     /// Version 2 runs the link over TLS and identifies the phone by a signed
     /// public key (`CompanionPairing`), so a version 1 peer cannot complete
-    /// a handshake at all.
-    public static let version = 2
+    /// a handshake at all. Version 3 drops the Mac's pairing window: any
+    /// unknown phone's hello raises the Mac's Allow prompt, the phone no
+    /// longer confirms the code itself (`hello` lost `checksPairingCode`),
+    /// `awaitingApproval` says whether the Mac's screen is locked, and an
+    /// unknown phone may be turned away with `pairingPaused`.
+    public static let version = 3
 
-    /// The oldest peer version this side will talk to. A peer below it speaks
-    /// the version 1 handshake and transport, which version 2 replaced.
-    public static let minimumPeerVersion = 2
+    /// The oldest peer version this side will talk to. A version 2 peer
+    /// expects the pairing window and the phone-side code check that
+    /// version 3 removed.
+    public static let minimumPeerVersion = 3
 
     /// Bonjour TXT record keys.
     public enum TXTKey {
@@ -35,8 +40,8 @@ public enum CompanionProto {
     /// Version check, run on the Bonjour TXT `proto` key before a socket
     /// opens and again on `hello`/`welcome`'s `protoVersion`. A peer newer
     /// than ours is refused because we don't know what it means; a peer
-    /// older than `minimumPeerVersion` is refused because version 2 changed
-    /// the handshake and transport. Anything in between is fine to talk to.
+    /// older than `minimumPeerVersion` is refused because it expects a pairing
+    /// flow this version no longer runs. Anything in between is fine to talk to.
     public static func isIncompatible(peerVersion: Int) -> Bool {
         peerVersion > version || peerVersion < minimumPeerVersion
     }
