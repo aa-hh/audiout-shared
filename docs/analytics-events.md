@@ -12,25 +12,24 @@ defined in `CONTEXT.md` in this repository — that glossary is the single
 place those words are defined; this file only says which property carries
 which one.
 
-Consent differs by app and is not symmetric. The phone is opt-in: analytics
-are off until the user answers one in-app question, asked once after the first
-successful connection to a Mac. A decline sends nothing at all — not even the
-question's own answer — and the Settings "Share usage data" switch changes the
-answer later, either way. A phone that only ever enters demo mode is never
-asked and so never reports. Debug builds of the phone never start the SDK, so
-nothing a developer or a test run does reports. Every phone event sent while
+Consent differs by app and is not symmetric. The phone is opt-out: analytics
+are on from first launch, and the Settings "Share usage data" switch turns
+them off. Off means the SDK is never started, so nothing at all is sent. A
+phone that answered the retired one-time question keeps that answer. Debug
+builds of the phone never start the SDK, so nothing a developer or a test run
+does reports. Every phone event sent while
 demo mode is active carries `demo: true`. The Mac is opt-out, but only through
 the free trial: analytics are on from first launch, with a Settings switch to
 turn them off that sticks once flipped. A paid user is asked once — a direct
 buyer sees the onboarding usage-stats card, a trial converter sees a one-time
 popover right after their paid key is accepted — and declining stops future
 collection, though whatever the trial already sent stays. Rulings: owner,
-2026-09-12 for the Mac, 2026-10-14 for the phone. A joined report that lines
+2026-09-12 for the Mac, 2026-10-20 for the phone (on by default; the
+2026-10-14 opt-in ruling is retired). A joined report that lines
 up a Mac and a phone by `mac_id` only fails to find a match for a paid user
 who declined that one-time ask, a Mac whose owner turned the Settings switch
 off during the trial, a phone that connected before any Mac analytics fired,
-or a phone whose owner declined the usage-data question or has not been asked
-it yet.
+or a phone whose owner turned "Share usage data" off.
 
 `mac_id` is the join key between a Mac and the phones connected to it. It is
 the value the Mac sends as `serverID` in its `welcome` message when a phone
@@ -144,7 +143,7 @@ itself.
 | `sync:run_cancelled` | phone | `mac_id`, `speaker_kind`, `speaker_model`, `how` | `speaker_kind`, `speaker_model`: see above; `how`: `cancel_button`, `sheet_closed` | A probe run in flight is stopped by the user before it reports — the run page's Cancel, or the sheet closing mid-run. Not sent for a run that already finished. |
 | `sync:recheck_accepted` | phone | `mac_id`, `speaker_kind`, `speaker_model` | see above | The phone's offer to re-check a first-pass measurement (once the Mac reports the speaker settled) is accepted. |
 | `sync:by_ear_nudged` | phone | `mac_id`, `speaker_kind`, `speaker_model` | see above | The user moves the by-ear slider one step in the sync sheet. One event per nudge, so a run's count says how much fiddling it took. Owner ruling 2026-09-10; the earlier reading (once per run that could not get a confident answer) is retired. |
-| `consent:granted` | phone | `mac_id` | — | The one-time usage-data question (after the first connection) or the Settings switch turns sharing on. Grant-only: a decline sends nothing. |
+| `consent:granted` | phone | `mac_id` | — | The Settings "Share usage data" switch turns sharing on. Grant-only: turning it off sends nothing. |
 | `connect:failed` | phone | `reason` | `local_network_denied` (the Local Network permission appears denied), `not_approved`, `approval_timed_out`, `mac_too_old` (the Mac refused the phone's newer protocol), `mac_too_new` (the Mac speaks a newer protocol than the phone), `mac_busy` (server full), `mac_disabled` (control from iPhone turned off on the Mac), `identity_refused` (the Mac rejected this phone's key or its signature), `identity_mismatch` (the Mac's certificate is not the one it advertised), `pairing_closed` (this phone is new to the Mac and the Mac is not taking new ones), `mac_quit` (the Mac app shut down), `link_lost` (keepalive timeout), `dial_failed` (transport or handshake failure), `other` | A connection attempt ends without a session, or a live link drops. `dial_failed`, `link_lost`, `mac_quit`, `identity_mismatch`, `pairing_closed` and `other` fire once per unbroken run of attempts; the rest fire each time. Never in demo mode; never when the user hung up. |
 | `remote:command_sent` | phone | `mac_id`, `command` | `command`: `setDeviceSelected`, `retryConnection`, `setMainOut`, `setDeviceVolume`, `setDeviceMuted`, `setSpeakerVisibility`, `forgetSpeakers`, `setMainOutMasterVolume`, `setMainOutMuted`, `createGroup`, `updateGroup`, `deleteGroup`, `setGroupMuted`, `addAppRoute`, `removeAppRoute`, `setAppDestination`, `setAppVolume`, `setConnectVolume`, `setStartBufferMs` | A user gesture sends a command to a live, real Mac. Sliders count once per gesture (the final send), never per tick. Alignment, password, icon and licence commands are not counted. Not sent in demo mode. |
 | `license:purchase_started` | phone | — | — | Buy is tapped with a loaded product; the App Store sheet is about to appear. |
