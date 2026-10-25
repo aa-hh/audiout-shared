@@ -451,6 +451,14 @@ import Testing
         #expect(command == .startAlignmentProbe(targetID: "device-2", referenceID: nil))
     }
 
+    // Turns red if the decoder reads `referenceID` on `prepareAlignmentProbe` with
+    // `decode` instead of `decodeIfPresent`.
+    @Test func prepareAlignmentProbeWithoutReferenceIDDecodes() throws {
+        let json = #"{"command":"prepareAlignmentProbe","id":"device-2"}"#
+        let command = try JSONDecoder().decode(CompanionCommand.self, from: Data(json.utf8))
+        #expect(command == .prepareAlignmentProbe(targetID: "device-2", referenceID: nil))
+    }
+
     // Turns red if the decoder reads `referenceID` on `setAlignmentTick` with
     // `decode` instead of `decodeIfPresent`.
     @Test func setAlignmentTickWithoutReferenceIDDecodes() throws {
@@ -504,6 +512,8 @@ import Testing
         .setConnectVolume(volume: 60),
         .setStartBufferMs(ms: 300),
         .requestAppIcons(bundleIDs: ["com.spotify.client", "com.apple.Music"]),
+        .prepareAlignmentProbe(targetID: "device-2", referenceID: "device-1"),
+        .prepareAlignmentProbe(targetID: "device-2", referenceID: nil),
         .startAlignmentProbe(targetID: "device-2", referenceID: "device-1"),
         .startAlignmentProbe(targetID: "device-2", referenceID: nil),
         .cancelAlignmentProbe(targetID: "device-2"),
