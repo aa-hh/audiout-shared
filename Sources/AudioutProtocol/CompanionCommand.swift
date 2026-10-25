@@ -53,6 +53,12 @@ public enum CompanionCommand: Equatable, Sendable {
     case setStartBufferMs(ms: Int)
     case requestAppIcons(bundleIDs: [String])
 
+    /// Sent by the phone when its sync sheet reaches the page with Start on it.
+    /// The Mac readies `targetID` and the reference (selects them, switches to
+    /// the wizard feed, waits for the speakers to release) so a
+    /// `startAlignmentProbe` that follows plays at once. A
+    /// `cancelAlignmentProbe` releases it. Refused like `startAlignmentProbe`.
+    case prepareAlignmentProbe(targetID: String, referenceID: String?)
     /// Starts a sync-calibration run for `targetID`: the Mac stages and
     /// plays the chirp measurement. `referenceID` names the output to
     /// compare against; `nil` lets the Mac pick its default (its own
@@ -139,7 +145,7 @@ extension CompanionCommand: Codable {
         case createGroup, updateGroup, deleteGroup, setGroupMuted
         case addAppRoute, removeAppRoute, setAppDestination, setAppVolume
         case setConnectVolume, setStartBufferMs, requestAppIcons
-        case startAlignmentProbe, cancelAlignmentProbe, reportAlignmentMeasurement
+        case prepareAlignmentProbe, startAlignmentProbe, cancelAlignmentProbe, reportAlignmentMeasurement
         case setAlignmentTick, nudgeAlignmentTrim, revertAlignmentNudge
         case clearAlignmentTuning, playAlignmentDemo
         case transportPlayPause, transportNext, transportPrevious
@@ -200,6 +206,8 @@ extension CompanionCommand: Codable {
             self = .setStartBufferMs(ms: try c.decode(Int.self, forKey: .ms))
         case .requestAppIcons:
             self = .requestAppIcons(bundleIDs: try c.decode([String].self, forKey: .bundleIDs))
+        case .prepareAlignmentProbe:
+            self = .prepareAlignmentProbe(targetID: try c.decode(String.self, forKey: .id), referenceID: try c.decodeIfPresent(String.self, forKey: .referenceID))
         case .startAlignmentProbe:
             self = .startAlignmentProbe(targetID: try c.decode(String.self, forKey: .id), referenceID: try c.decodeIfPresent(String.self, forKey: .referenceID))
         case .cancelAlignmentProbe:
@@ -310,6 +318,10 @@ extension CompanionCommand: Codable {
         case .requestAppIcons(let bundleIDs):
             try c.encode(Name.requestAppIcons.rawValue, forKey: .command)
             try c.encode(bundleIDs, forKey: .bundleIDs)
+        case .prepareAlignmentProbe(let targetID, let referenceID):
+            try c.encode(Name.prepareAlignmentProbe.rawValue, forKey: .command)
+            try c.encode(targetID, forKey: .id)
+            try c.encodeIfPresent(referenceID, forKey: .referenceID)
         case .startAlignmentProbe(let targetID, let referenceID):
             try c.encode(Name.startAlignmentProbe.rawValue, forKey: .command)
             try c.encode(targetID, forKey: .id)
