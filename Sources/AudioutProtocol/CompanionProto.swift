@@ -35,6 +35,11 @@ public enum CompanionProto {
         /// (`CompanionPairing.fingerprintHex`). The phone dials only a Mac
         /// whose certificate hashes to this value.
         public static let fingerprint = "fp"
+        /// The Mac's hardware model code (`hw.model`, for example
+        /// `MacBookPro17,1`). Optional; the phone shows
+        /// `MacModel.friendlyName(forCode:)` until `welcome` brings the
+        /// computer's own name. Never the computer's name itself.
+        public static let model = "model"
     }
 
     /// Version check, run on the Bonjour TXT `proto` key before a socket
