@@ -186,6 +186,33 @@ import Testing
         #expect(try roundTrip(message) == message)
     }
 
+    // Turns red if `refusalCode` is dropped from `commandResult`'s encode or decode.
+    @Test func commandResultRoundTripsWithARefusalCode() throws {
+        let message = CompanionMessage.commandResult(requestID: "req-4", applied: false, refusalReason: "Your Mac already has a licence.", autoSwappedCurrentDevice: false, refusalCode: CompanionRefusalCode.alreadyLicensed)
+        #expect(try roundTrip(message) == message)
+    }
+
+    // Turns red if a result from an older Mac stops decoding, or the encoder writes `refusalCode` with no value.
+    @Test func aCommandResultWithoutRefusalCodeDecodesAsNil() throws {
+        let json = """
+        {"v": 3, "type": "commandResult", "payload": {"requestID": "r1", "applied": false, "refusalReason": "busy", "autoSwappedCurrentDevice": false}}
+        """
+        let message = CompanionMessage.commandResult(requestID: "r1", applied: false, refusalReason: "busy", autoSwappedCurrentDevice: false)
+        #expect(try CompanionEnvelope.decode(Data(json.utf8)).message == message)
+        let wire = String(decoding: try CompanionEnvelope(message: message).encoded(), as: UTF8.self)
+        #expect(!wire.contains("refusalCode"))
+    }
+
+    // Turns red if a `CompanionRefusalCode` constant is renamed or its spelling changes.
+    @Test func refusalCodesAreSpelledAsTheContractTable() {
+        #expect(CompanionRefusalCode.alreadyLicensed == "alreadyLicensed")
+        #expect(CompanionRefusalCode.busy == "busy")
+        #expect(CompanionRefusalCode.serverUnreachable == "serverUnreachable")
+        #expect(CompanionRefusalCode.revoked == "revoked")
+        #expect(CompanionRefusalCode.unrecognised == "unrecognised")
+        #expect(CompanionRefusalCode.cannotCheck == "cannotCheck")
+    }
+
     @Test func goodbyeRoundTrips() throws {
         let message = CompanionMessage.goodbye(reason: "shutdown")
         #expect(try roundTrip(message) == message)
