@@ -79,6 +79,7 @@ import Testing
             transportAvailable: true,
             missingSpeakers: [MissingSpeakerState(id: "device-9", name: "Garage", kind: "sonos")],
             note: NoteState(text: "Audiout isn't your Mac's output device.", severity: "warning"),
+            macLicense: MacLicense(status: .trial, keyHash: "ab12", trialEndsAt: Date(timeIntervalSinceReferenceDate: 800_000_000)),
             settings: SettingsState(connectVolume: 70, connectVolumeMin: 0, connectVolumeMax: 100, startBufferMs: 200, startBufferOptionsMs: [100, 200, 500])
         )
     }
@@ -185,6 +186,33 @@ import Testing
         #expect(try roundTrip(message) == message)
     }
 
+    // Turns red if `refusalCode` is dropped from `commandResult`'s encode or decode.
+    @Test func commandResultRoundTripsWithARefusalCode() throws {
+        let message = CompanionMessage.commandResult(requestID: "req-4", applied: false, refusalReason: "Your Mac already has a licence.", autoSwappedCurrentDevice: false, refusalCode: CompanionRefusalCode.alreadyLicensed)
+        #expect(try roundTrip(message) == message)
+    }
+
+    // Turns red if a result from an older Mac stops decoding, or the encoder writes `refusalCode` with no value.
+    @Test func aCommandResultWithoutRefusalCodeDecodesAsNil() throws {
+        let json = """
+        {"v": 3, "type": "commandResult", "payload": {"requestID": "r1", "applied": false, "refusalReason": "busy", "autoSwappedCurrentDevice": false}}
+        """
+        let message = CompanionMessage.commandResult(requestID: "r1", applied: false, refusalReason: "busy", autoSwappedCurrentDevice: false)
+        #expect(try CompanionEnvelope.decode(Data(json.utf8)).message == message)
+        let wire = String(decoding: try CompanionEnvelope(message: message).encoded(), as: UTF8.self)
+        #expect(!wire.contains("refusalCode"))
+    }
+
+    // Turns red if a `CompanionRefusalCode` constant is renamed or its spelling changes.
+    @Test func refusalCodesAreSpelledAsTheContractTable() {
+        #expect(CompanionRefusalCode.alreadyLicensed == "alreadyLicensed")
+        #expect(CompanionRefusalCode.busy == "busy")
+        #expect(CompanionRefusalCode.serverUnreachable == "serverUnreachable")
+        #expect(CompanionRefusalCode.revoked == "revoked")
+        #expect(CompanionRefusalCode.unrecognised == "unrecognised")
+        #expect(CompanionRefusalCode.cannotCheck == "cannotCheck")
+    }
+
     @Test func goodbyeRoundTrips() throws {
         let message = CompanionMessage.goodbye(reason: "shutdown")
         #expect(try roundTrip(message) == message)
@@ -273,7 +301,7 @@ import Testing
         #expect(icons[1].png == nil)
     }
 
-    // Renaming a coding key or dropping a field on `Snapshot` or `DeviceState`, `isPlaying` and `model` included, turns this red.
+    // Renaming a coding key or dropping a field on `Snapshot` or `DeviceState`, `isPlaying`, `model` and `macLicense` included, turns this red.
     @Test func fullyPopulatedSnapshotRoundTrips() throws {
         let snapshot = Self.fullSnapshot()
         let data = try JSONEncoder().encode(snapshot)
@@ -286,6 +314,7 @@ import Testing
         #expect(reloaded.devices[0].model == "AudioAccessory5,1")
         #expect(reloaded.missingSpeakers == [MissingSpeakerState(id: "device-9", name: "Garage", kind: "sonos")])
         #expect(reloaded.note == NoteState(text: "Audiout isn't your Mac's output device.", severity: "warning"))
+        #expect(reloaded.macLicense == MacLicense(status: .trial, keyHash: "ab12", trialEndsAt: Date(timeIntervalSinceReferenceDate: 800_000_000)))
     }
 
     // Renaming a coding key of `missingSpeakers` or `note`, or encoding nil as a null instead of leaving the key out, turns this red.
@@ -325,6 +354,59 @@ import Testing
         #expect(!json.contains("transportAvailable"))
         let reloaded = try JSONDecoder().decode(Snapshot.self, from: data)
         #expect(reloaded.transportAvailable == nil)
+    }
+
+    // Encoding a nil `macLicense` as null, or making the key required on `Snapshot`, turns red.
+    @Test func snapshotWithoutMacLicenseLeavesTheKeyOutAndDecodesAsNil() throws {
+        var snapshot = Self.fullSnapshot()
+        snapshot.macLicense = nil
+        let data = try JSONEncoder().encode(snapshot)
+        let json = try #require(String(data: data, encoding: .utf8))
+        #expect(!json.contains("macLicense"))
+        let reloaded = try JSONDecoder().decode(Snapshot.self, from: data)
+        #expect(reloaded.macLicense == nil)
+    }
+
+    // Renaming a `MacLicense` key, or `trialEndsAt` leaving the envelope's default date encoding, turns red.
+    @Test func macLicenseDecodesFromAHandWrittenWireLiteral() throws {
+        let json = """
+        {"status": "trialEnded", "keyHash": "ab12", "trialEndsAt": 800000000}
+        """
+        let decoded = try JSONDecoder().decode(MacLicense.self, from: Data(json.utf8))
+        #expect(decoded == MacLicense(status: .trialEnded, keyHash: "ab12", trialEndsAt: Date(timeIntervalSinceReferenceDate: 800_000_000)))
+    }
+
+    // Removing the fallback decoder on `MacLicense.Status` turns red.
+    @Test func aSnapshotWithAnUnknownMacLicenseStatusStillDecodes() throws {
+        let json = """
+        {
+            "serverName": "Alec's Mac",
+            "devices": [],
+            "mainOut": {"kind": "selected"},
+            "mainOutMasterVolume": 50,
+            "mainOutMuted": false,
+            "groups": [],
+            "appRoutes": [],
+            "liveRoutedAppNames": {},
+            "addableApps": [],
+            "localFallbackActive": false,
+            "macLicense": {"status": "suspended", "keyHash": "ab12"},
+            "settings": {"connectVolume": 50, "connectVolumeMin": 0, "connectVolumeMax": 100, "startBufferMs": 200, "startBufferOptionsMs": [100, 200]}
+        }
+        """
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: Data(json.utf8))
+        #expect(snapshot.macLicense?.status == .unchecked)
+        #expect(snapshot.macLicense?.keyHash == "ab12")
+        #expect(snapshot.macLicense?.trialEndsAt == nil)
+    }
+
+    // Encoding a nil `keyHash` or `trialEndsAt` as null instead of leaving the key out turns red.
+    @Test func aMacLicenseWithOnlyAStatusLeavesTheOtherKeysOut() throws {
+        let data = try JSONEncoder().encode(MacLicense(status: .unlicensed))
+        let json = try #require(String(data: data, encoding: .utf8))
+        #expect(json.contains("\"status\":\"unlicensed\""))
+        #expect(!json.contains("keyHash"))
+        #expect(!json.contains("trialEndsAt"))
     }
 
     @Test func deviceStateWithFullAlignmentStateRoundTrips() throws {
@@ -743,6 +825,33 @@ import Testing
         #expect(snapshot.activeGroupID == nil)
         #expect(snapshot.takeoverStatus == nil)
         #expect(snapshot.macAppVersion == nil, "a welcome from a Mac that predates the field decodes as no Mac version")
+        #expect(snapshot.macLicense == nil, "a welcome from a Mac that predates the field decodes as no licence state")
+    }
+
+    // Turns red if the welcome's `companionToken` decode goes back to strict.
+    @Test func aWelcomeWithANonStringCompanionTokenDecodesWithNoToken() throws {
+        let json = """
+        {"v": 2, "type": "welcome", "payload": {"serverName": "Alec's Mac", "protoVersion": 1, "companionToken": 42, "snapshot": {
+            "serverName": "Alec's Mac",
+            "devices": [],
+            "mainOut": {"kind": "selected"},
+            "mainOutMasterVolume": 50,
+            "mainOutMuted": false,
+            "groups": [],
+            "appRoutes": [],
+            "liveRoutedAppNames": {},
+            "addableApps": [],
+            "localFallbackActive": false,
+            "settings": {"connectVolume": 50, "connectVolumeMin": 0, "connectVolumeMax": 100, "startBufferMs": 200, "startBufferOptionsMs": [100, 200]}
+        }}}
+        """
+        let envelope = try CompanionEnvelope.decode(Data(json.utf8))
+        guard case .welcome(let serverName, _, _, let companionToken, _) = envelope.message else {
+            Issue.record("expected .welcome")
+            return
+        }
+        #expect(serverName == "Alec's Mac")
+        #expect(companionToken == nil)
     }
 
     /// Turns red if `macAppVersion` is dropped from `Snapshot`'s coding.

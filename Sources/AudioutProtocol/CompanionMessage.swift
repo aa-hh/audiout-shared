@@ -42,6 +42,8 @@ public enum CompanionMessage: Equatable, Sendable {
     /// `nil` when the Mac has none — an unlicensed or never-checked-in Mac,
     /// or an older Mac whose `welcome` predates the field. It is absent from
     /// the wire when `nil`, so an older phone never sees the key at all.
+    /// A `companionToken` that is not a string decodes as `nil` rather than
+    /// failing the `welcome`.
     /// `serverID` is a random join id the Mac keeps in its own settings, sent
     /// so an analytics funnel can link this Mac's events to this phone's —
     /// it is never the Mac's analytics distinct id and never any identifier
@@ -60,7 +62,11 @@ public enum CompanionMessage: Equatable, Sendable {
     /// the prompt is up.
     case awaitingApproval(screenLocked: Bool)
     case state(snapshot: Snapshot)
-    case commandResult(requestID: String, applied: Bool, refusalReason: String?, autoSwappedCurrentDevice: Bool)
+    /// `refusalReason` is the sentence shown to the user. `refusalCode` is one
+    /// of `CompanionRefusalCode`'s constants, sent only with `applied: false`
+    /// for `activateLicenseKey`; `nil` (absent from the wire) otherwise and
+    /// from a Mac that predates the field.
+    case commandResult(requestID: String, applied: Bool, refusalReason: String?, autoSwappedCurrentDevice: Bool, refusalCode: String? = nil)
     /// `reason` is one of `CompanionGoodbyeReason`'s constants.
     /// `retryAfterSeconds` is how long until asking again can succeed, sent
     /// only with `pairingPaused`; `nil` (absent from the wire) otherwise.
@@ -142,6 +148,24 @@ public enum CompanionGoodbyeReason {
     public static let removed = "removed"
 }
 
+/// Every `commandResult` `refusalCode` the Mac sends for `activateLicenseKey`.
+/// A code the phone doesn't recognise (a newer Mac's) is final: treat it like
+/// `unrecognised`.
+public enum CompanionRefusalCode {
+    /// The Mac has its own active paid key, different from the phone's, and keeps it.
+    public static let alreadyLicensed = "alreadyLicensed"
+    /// The Mac is checking another key right now; retrying at once is fine.
+    public static let busy = "busy"
+    /// The Mac couldn't reach the licence server and restored its previous state.
+    public static let serverUnreachable = "serverUnreachable"
+    /// The phone's key is refunded or revoked.
+    public static let revoked = "revoked"
+    /// The licence server doesn't know the key.
+    public static let unrecognised = "unrecognised"
+    /// This Mac build has no licence server (a dev build).
+    public static let cannotCheck = "cannotCheck"
+}
+
 /// The allowed values of ``DeviceState/AlignmentState/source`` and
 /// `CompanionMessage.alignmentApplied`'s `source`, so neither peer types the
 /// strings by hand. See the Mac's `docs/adr/0001-remembered-offset-on-reconnect.md`
@@ -210,7 +234,7 @@ extension CompanionEnvelope: Codable {
         case nonce
         case requestID, command
         case serverName, snapshot, companionToken, serverID
-        case applied, refusalReason, autoSwappedCurrentDevice
+        case applied, refusalReason, refusalCode, autoSwappedCurrentDevice
         case screenLocked
         case reason, retryAfterSeconds
         case page, pageCount, icons
@@ -257,7 +281,9 @@ extension CompanionEnvelope: Codable {
                 serverName: try payload.decode(String.self, forKey: .serverName),
                 protoVersion: try payload.decode(Int.self, forKey: .protoVersion),
                 snapshot: try payload.decode(Snapshot.self, forKey: .snapshot),
-                companionToken: try payload.decodeIfPresent(String.self, forKey: .companionToken),
+                // A malformed token must cost the phone only the token, not the
+                // connection; the phone treats nil as "no proof".
+                companionToken: try? payload.decodeIfPresent(String.self, forKey: .companionToken),
                 serverID: try payload.decodeIfPresent(String.self, forKey: .serverID)
             )
         case .awaitingApproval:
@@ -269,7 +295,8 @@ extension CompanionEnvelope: Codable {
                 requestID: try payload.decode(String.self, forKey: .requestID),
                 applied: try payload.decode(Bool.self, forKey: .applied),
                 refusalReason: try payload.decodeIfPresent(String.self, forKey: .refusalReason),
-                autoSwappedCurrentDevice: try payload.decode(Bool.self, forKey: .autoSwappedCurrentDevice)
+                autoSwappedCurrentDevice: try payload.decode(Bool.self, forKey: .autoSwappedCurrentDevice),
+                refusalCode: try payload.decodeIfPresent(String.self, forKey: .refusalCode)
             )
         case .goodbye:
             message = .goodbye(
@@ -337,13 +364,14 @@ extension CompanionEnvelope: Codable {
             try c.encode(TypeName.state.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(snapshot, forKey: .snapshot)
-        case .commandResult(let requestID, let applied, let refusalReason, let autoSwappedCurrentDevice):
+        case .commandResult(let requestID, let applied, let refusalReason, let autoSwappedCurrentDevice, let refusalCode):
             try c.encode(TypeName.commandResult.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
             try payload.encode(requestID, forKey: .requestID)
             try payload.encode(applied, forKey: .applied)
             try payload.encodeIfPresent(refusalReason, forKey: .refusalReason)
             try payload.encode(autoSwappedCurrentDevice, forKey: .autoSwappedCurrentDevice)
+            try payload.encodeIfPresent(refusalCode, forKey: .refusalCode)
         case .goodbye(let reason, let retryAfterSeconds):
             try c.encode(TypeName.goodbye.rawValue, forKey: .type)
             var payload = c.nestedContainer(keyedBy: PayloadKeys.self, forKey: .payload)
