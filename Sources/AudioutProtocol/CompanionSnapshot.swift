@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+import Foundation
+
 /// Where Main Out is currently pointed. `MainOutTarget` on the Mac side isn't
 /// directly `Codable` (associated value), so this flattens it to `kind` +
 /// optional `groupID` — the same idiom as `RoutingStore.State` (kind +
@@ -364,6 +366,50 @@ public struct SettingsState: Codable, Equatable, Sendable {
     }
 }
 
+/// The Mac's own licence state. Unsigned and sent by the Mac: the phone uses it
+/// only to choose wording, to decide whether to show Buy or send its key, and
+/// to drop a stored proof whose `key_hash` equals `keyHash`. It never unlocks
+/// anything.
+public struct MacLicense: Codable, Equatable, Sendable {
+    public enum Status: String, Codable, Sendable {
+        /// Paid key, last verdict active.
+        case active
+        /// Trial key, running.
+        case trial
+        /// The trial key's time is up.
+        case trialEnded
+        /// Refund, chargeback, manual revoke, or an expired test purchase.
+        case revoked
+        /// No key and no trial. Never `none`: it collides with `Optional.none`.
+        case unlicensed
+        /// A key is on file but no verdict yet (offline since launch, or a dev
+        /// build with no licence server).
+        case unchecked
+
+        /// A value this build doesn't know (a newer Mac's) decodes as
+        /// `unchecked` instead of failing the snapshot.
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Status(rawValue: raw) ?? .unchecked
+        }
+    }
+
+    public let status: Status
+    /// Lowercase hex SHA-256 of the Mac's key, the same digest as the proof's
+    /// `key_hash`. `nil` when there is no key.
+    public let keyHash: String?
+    /// Trial end, trials only. Travels as the envelope's default `JSONEncoder`
+    /// writes a `Date`: seconds since 2001-01-01, not unix seconds like the
+    /// proof's `trial_ends`.
+    public let trialEndsAt: Date?
+
+    public init(status: Status, keyHash: String? = nil, trialEndsAt: Date? = nil) {
+        self.status = status
+        self.keyHash = keyHash
+        self.trialEndsAt = trialEndsAt
+    }
+}
+
 /// Full app state, sent whole on connect (`welcome`) and again on every
 /// change (`state`), coalesced ~50 ms and suppressed when `Equatable`-identical
 /// to the last broadcast (`CompanionServer`, T5) — the server is the one
@@ -425,6 +471,12 @@ public struct Snapshot: Codable, Equatable, Sendable {
     /// support email names both ends' versions; nothing behaves differently on
     /// it.
     public var macAppVersion: String?
+    /// The Mac's own licence state. `nil` from a Mac that predates the field
+    /// (additive change, no protocol break). Unsigned: never a reason to
+    /// unlock. The Mac re-sends the snapshot when it changes, which the
+    /// `Equatable` suppression above allows because the field is part of
+    /// equality.
+    public var macLicense: MacLicense?
     public var settings: SettingsState
 
     public init(
@@ -445,6 +497,7 @@ public struct Snapshot: Codable, Equatable, Sendable {
         missingSpeakers: [MissingSpeakerState]? = nil,
         note: NoteState? = nil,
         macAppVersion: String? = nil,
+        macLicense: MacLicense? = nil,
         settings: SettingsState
     ) {
         self.serverName = serverName
@@ -464,6 +517,7 @@ public struct Snapshot: Codable, Equatable, Sendable {
         self.missingSpeakers = missingSpeakers
         self.note = note
         self.macAppVersion = macAppVersion
+        self.macLicense = macLicense
         self.settings = settings
     }
 }
