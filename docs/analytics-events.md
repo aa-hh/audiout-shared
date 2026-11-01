@@ -86,8 +86,8 @@ itself.
 | `surface:shown` | mac | `screen` | the screen shown (mixer, scenes, and so on) | The app's popover or window is shown after being hidden. |
 | `surface:screen_selected` | mac | `screen` | `mixer`, `groups` (the Scenes screen; the value name is unchanged on purpose), `speakers`, `settings` | The user switches tabs/screens inside the app's surface. |
 | `surface:pin_toggled` | mac | `pinned` | `true`, `false` | The popover's pin (keep open) control is toggled. |
-| `connection:failed` | mac | `kind`, `cause` | `kind`: the speaker's connection kind; `cause`: the failure cause | A speaker's connection state transitions into failed. |
-| `connection:connected` | mac | `kind` | the speaker's connection kind | A non-local speaker successfully connects. |
+| `connection:failed` | mac | `kind`, `cause`, `speaker`, `trigger` | `kind`: the speaker's connection kind; `cause`: the failure cause; `speaker`: a per-install number for the speaker (the same counter `bt_sync:link_settled` uses), never its id or name, absent from builds before 2026-11-01; `trigger`: `user` when a person selected, retried or reconnected that speaker, or moved Main Out onto it, from the Mac or the phone, in the last 30 seconds, else `auto` | A speaker the user wants (selected, a redirect target, or a member of the playing group) enters the failed state. |
+| `connection:connected` | mac | `kind`, `speaker`, `trigger`, `recovered`, `recovery_seconds_bucket` | `kind`, `speaker`, `trigger`: as on `connection:failed`; `recovered`: `true` when this connect ends a run of `connection:failed` for the same speaker, else `false`; `recovery_seconds_bucket` (only when `recovered` is `true`): seconds from that run's first failure, as `0-9`, `10-59`, `60-299` or `300+` | A non-local speaker the user wants connects. A `connection:failed` with no recovered connect for the same `speaker` after it is a failure the user gave up on. |
 | `connection:diagnosis_shown` | mac | `cause` | the failure cause | The connection-failure diagnosis panel is shown for a speaker. |
 | `connection:retry_clicked` | mac | — | — | The diagnosis panel's Retry is clicked. |
 | `airplay:code_prompt_shown` | mac | `kind` | `password`, `onScreenCode` | The sheet asking for a speaker's AirPlay password or on-screen code opens on the Mac. |
@@ -214,10 +214,15 @@ list. The phone's unhandled crashes are reported the same way, by the SDK
 itself under the same consent answer, and the phone defines no exception types
 of its own.
 
+A report with a `cause` property also sets `$exception_fingerprint` to
+`<type>:<cause>` and `$issue_name` to `<type> (<cause>)`, so PostHog files each
+cause as its own issue. Builds before 2026-11-01 group every cause of a type
+into one issue.
+
 | exception type | properties | allowed values | when it fires |
 |---|---|---|---|
-| `airplay:session_failed` | `state`, `cause`, `wasStreaming` | `state`: `failed`, `passwordRequired`; `cause`: `authRequired`, `codeRequired`, `codeEveryTimeUnsupported`, `homeMembersOnly`, `droppedMidStream`, `unknown`; `wasStreaming`: `true`, `false` | A live AirPlay session dies while the user still wants that speaker on. |
-| `airplay:connect_failed` | `cause`, `reason` | `cause`: `timingUnavailable`, `authRequired`, `codeRequired`, `codeEveryTimeUnsupported`, `homeMembersOnly`, `timedOut`, `unknown`; `reason`: the sender error's case name (`engineNotRunning`, `initFailed`, `operationRejected`, `sessionFailed`, `passwordRequired`, `unknownOutput`, `invalidDescriptor`, `engineThreadFailed`, `opTimedOut`), the timing gate's outcome when `cause` is `timingUnavailable` (`needsApproval`, `timingPortsUnavailable`), or else the Swift error's type name | An AirPlay speaker fails to connect. `reason` says why when `cause` is `unknown`; the error text stays local, because it can name the speaker. |
+| `airplay:session_failed` | `state`, `cause`, `wasStreaming`, `speaker` | `state`: `failed`, `passwordRequired`; `cause`: `authRequired`, `codeRequired`, `codeEveryTimeUnsupported`, `homeMembersOnly`, `droppedMidStream`, `unknown`; `wasStreaming`: `true`, `false`; `speaker`: as on `connection:failed` | A live AirPlay session dies while the user still wants that speaker on. |
+| `airplay:connect_failed` | `cause`, `reason`, `speaker` | `cause`: `timingUnavailable`, `authRequired`, `codeRequired`, `codeEveryTimeUnsupported`, `homeMembersOnly`, `timedOut`, `unknown`; `reason`: the sender error's case name (`engineNotRunning`, `initFailed`, `operationRejected`, `sessionFailed`, `passwordRequired`, `unknownOutput`, `invalidDescriptor`, `engineThreadFailed`, `opTimedOut`), the timing gate's outcome when `cause` is `timingUnavailable` (`needsApproval`, `timingPortsUnavailable`), or else the Swift error's type name; `speaker`: as on `connection:failed` | An AirPlay speaker fails to connect. `reason` says why when `cause` is `unknown`; the error text stays local, because it can name the speaker. |
 | `airplay:password_store_failed` | `operation` | `save`, `delete` | The Keychain refused to save or delete a speaker's AirPlay password; the speaker id and OSStatus stay local. |
 | `capture:whole_system_failed` | `kind`, `retrying` | `kind`: `tap_creation_failed`, `aggregate_device_failed`, `format_read_failed`, `device_lost`, `os_unsupported`; `retrying`: `true`, `false` | System audio capture fails while capture is wanted. |
 | `local_playback:start_failed` | `site` | `synced_local`, `app_routes`, `capture_state`, `leveled` | Playing through the Mac's own speakers fails to start (a "play everywhere" selection or a "This Mac"-routed app), so the Mac stays silent while the speakers play. The error text stays local. |
