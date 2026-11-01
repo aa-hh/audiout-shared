@@ -828,6 +828,32 @@ import Testing
         #expect(snapshot.macLicense == nil, "a welcome from a Mac that predates the field decodes as no licence state")
     }
 
+    // Turns red if the welcome's `companionToken` decode goes back to strict.
+    @Test func aWelcomeWithANonStringCompanionTokenDecodesWithNoToken() throws {
+        let json = """
+        {"v": 2, "type": "welcome", "payload": {"serverName": "Alec's Mac", "protoVersion": 1, "companionToken": 42, "snapshot": {
+            "serverName": "Alec's Mac",
+            "devices": [],
+            "mainOut": {"kind": "selected"},
+            "mainOutMasterVolume": 50,
+            "mainOutMuted": false,
+            "groups": [],
+            "appRoutes": [],
+            "liveRoutedAppNames": {},
+            "addableApps": [],
+            "localFallbackActive": false,
+            "settings": {"connectVolume": 50, "connectVolumeMin": 0, "connectVolumeMax": 100, "startBufferMs": 200, "startBufferOptionsMs": [100, 200]}
+        }}}
+        """
+        let envelope = try CompanionEnvelope.decode(Data(json.utf8))
+        guard case .welcome(let serverName, _, _, let companionToken, _) = envelope.message else {
+            Issue.record("expected .welcome")
+            return
+        }
+        #expect(serverName == "Alec's Mac")
+        #expect(companionToken == nil)
+    }
+
     /// Turns red if `macAppVersion` is dropped from `Snapshot`'s coding.
     @Test func aWelcomeCarriesTheMacAppVersionThroughARoundTrip() throws {
         let snapshot = Snapshot(

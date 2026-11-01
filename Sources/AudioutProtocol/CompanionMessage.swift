@@ -42,6 +42,8 @@ public enum CompanionMessage: Equatable, Sendable {
     /// `nil` when the Mac has none — an unlicensed or never-checked-in Mac,
     /// or an older Mac whose `welcome` predates the field. It is absent from
     /// the wire when `nil`, so an older phone never sees the key at all.
+    /// A `companionToken` that is not a string decodes as `nil` rather than
+    /// failing the `welcome`.
     /// `serverID` is a random join id the Mac keeps in its own settings, sent
     /// so an analytics funnel can link this Mac's events to this phone's —
     /// it is never the Mac's analytics distinct id and never any identifier
@@ -279,7 +281,9 @@ extension CompanionEnvelope: Codable {
                 serverName: try payload.decode(String.self, forKey: .serverName),
                 protoVersion: try payload.decode(Int.self, forKey: .protoVersion),
                 snapshot: try payload.decode(Snapshot.self, forKey: .snapshot),
-                companionToken: try payload.decodeIfPresent(String.self, forKey: .companionToken),
+                // A malformed token must cost the phone only the token, not the
+                // connection; the phone treats nil as "no proof".
+                companionToken: try? payload.decodeIfPresent(String.self, forKey: .companionToken),
                 serverID: try payload.decodeIfPresent(String.self, forKey: .serverID)
             )
         case .awaitingApproval:
